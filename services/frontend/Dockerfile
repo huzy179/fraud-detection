@@ -3,12 +3,12 @@ FROM node:18-alpine
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm ci
+RUN npm ci --prefer-offline || npm install
 
 COPY . .
 
-ENV NODE_ENV=production
-ENV NEXT_PUBLIC_API_URL=http://api:8000
+ENV NODE_ENV=development
+ENV NEXT_PUBLIC_API_URL=http://localhost:8000
 
 EXPOSE 3000
 

@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(docker-compose build:*)",
+      "Bash(pkill -f mlflow)",
+      "Read(//Users/maitranhuy/fraud-detection/**)",
+      "Bash(open -a Docker)",
+      "Bash(docker ps:*)",
+      "Bash(curl -s -X POST http://localhost:8000/predict -H \"Content-Type: application/json\" -d '{\"\"transaction\"\":{\"\"V1\"\":-1.359,\"\"V2\"\":-0.072,\"\"V3\"\":2.536,\"\"V4\"\":1.378,\"\"V5\"\":-0.338,\"\"V6\"\":0.462,\"\"V7\"\":0.239,\"\"V8\"\":0.098,\"\"V9\"\":-0.664,\"\"V10\"\":0.463,\"\"V11\"\":-0.931,\"\"V12\"\":-2.304,\"\"V13\"\":0.772,\"\"V14\"\":-1.576,\"\"V15\"\":-0.230,\"\"V16\"\":-0.050,\"\"V17\"\":-0.844,\"\"V18\"\":-0.380,\"\"V19\"\":0.597,\"\"V20\"\":-0.697,\"\"V21\"\":-0.055,\"\"V22\"\":-0.270,\"\"V23\"\":-0.233,\"\"V24\"\":0.140,\"\"V25\"\":-0.052,\"\"V26\"\":0.265,\"\"V27\"\":0.825,\"\"V28\"\":-0.068,\"\"Amount\"\":149.52,\"\"Time\"\":40680}}')",
+      "Bash(python3 -m json.tool echo \"=== Prometheus ===\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:9090 echo \"\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3002 echo \"\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5001)",
+      "Bash(docker exec:*)",
+      "Bash(docker restart:*)",
+      "Bash(python3 /Users/maitranhuy/fraud-detection/data/scripts/seed_data.py)",
+      "Bash(curl -s http://localhost:8000/transactions/stats)",
+      "Bash(python3 -m json.tool)",
+      "Bash(curl -s http://localhost:3000)",
+      "Bash(curl -s http://localhost:8000/transactions)",
+      "Bash(python3 -c \"import notebook; print\\(''notebook ok''\\)\")",
+      "Bash(jupyter nbconvert:*)",
+      "Bash(papermill notebooks/01_eda.ipynb notebooks/01_eda_executed.ipynb --kernel python3)",
+      "Bash(python3 -c \":*)",
+      "Bash(/opt/anaconda3/bin/python3 -c \":*)",
+      "Bash(ls -lh /Users/maitranhuy/fraud-detection/docs/*.png)",
+      "Bash(pytest /Users/maitranhuy/fraud-detection/services/ml-serving/tests/test_main.py -v)"
+    ]
+  }
+}
