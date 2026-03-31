@@ -14,6 +14,7 @@ import joblib
 import numpy as np
 import xgboost as xgb
 from fastapi import FastAPI, HTTPException, Query, Depends
+from fastapi.responses import PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from prometheus_client import Counter, Histogram, Gauge, generate_latest
@@ -372,10 +373,10 @@ async def get_stats(db: Session = Depends(get_db)):
 
 
 # ── Prometheus Metrics ──────────────────────────────────────────────────────────
-@app.get("/metrics")
+@app.get("/metrics", response_class=PlainTextResponse)
 async def metrics():
     """Prometheus metrics endpoint."""
-    return {"content": generate_latest()}
+    return generate_latest()
 
 
 if __name__ == "__main__":

@@ -27,7 +27,14 @@ services:
       - "5000:5000"
     volumes:
       - mlflow_data:/mlflow
-    command: mlflow ui --backend-store-uri postgresql://postgres:postgres@postgres:5432/mlflow_db --default-artifact-root /mlflow/artifacts
+      - ./data:/app/data
+      - ./models:/app/models
+    command: >-
+      mlflow server
+      --backend-store-uri postgresql://postgres:postgres@postgres:5432/mlflow_db
+      --default-artifact-root /mlflow/artifacts
+      --host 0.0.0.0
+      --port 5000
     environment:
       MLFLOW_TRACKING_URI: postgresql://postgres:postgres@postgres:5432/mlflow_db
     depends_on:
@@ -45,15 +52,13 @@ services:
     volumes:
       - ./services/ml-serving/models:/app/models
       - ./data/processed:/app/data/processed
+      - ./data:/app/data
     environment:
       FRAUD_THRESHOLD: "0.5"
       MODEL_PATH: /app/models
       DATA_DIR: /app/data
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/fraud_detection
-      MLFLOW_TRACKING_URI: http://mlflow:5000
     depends_on:
-      mlflow:
-        condition: service_started
       postgres:
         condition: service_healthy
     healthcheck:
@@ -75,7 +80,7 @@ services:
     depends_on:
       - api
 
-  # ─── Prometheus ───────────────────────────────────────────────────────────
+  # ─── Prometheus ────────────────────────────────────────────────────────────
   prometheus:
     image: prom/prometheus:v2.47.0
     container_name: fraud_prometheus

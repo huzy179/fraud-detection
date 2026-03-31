@@ -1,0 +1,21 @@
+FROM python:3.10-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Scripts are mounted; models output to mounted volume
+ENV PYTHONPATH=/app
+ENV MLFLOW_TRACKING_URI=http://mlflow:5000
+
+# Entrypoint: download data → preprocess → train → stay alive
+# Override CMD with "sleep infinity" after training if needed
+COPY data/scripts/ ./data/scripts/
+COPY services/ml-pipeline/scripts/ ./scripts/
+
+ENTRYPOINT ["python", "-c", "from scripts.preprocess import main as pm; from scripts.train import main as tm; pm(); tm()"]
