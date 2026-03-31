@@ -46,15 +46,17 @@ def clean_data(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def scale_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Scale Time and Amount features."""
-    scaler = StandardScaler()
-    df["Time_scaled"] = scaler.fit_transform(df[["Time"]])
-    df["Amount_scaled"] = scaler.fit_transform(df[["Amount"]])
+    """Scale Time and Amount features separately (1 scaler each)."""
+    time_scaler = StandardScaler()
+    df["Time_scaled"] = time_scaler.fit_transform(df[["Time"]])
 
-    # Save scaler
-    scaler_path = os.path.join(PROCESSED_DIR, "scaler.joblib")
-    joblib.dump(scaler, scaler_path)
-    logger.info(f"Scaler saved to {scaler_path}")
+    amount_scaler = StandardScaler()
+    df["Amount_scaled"] = amount_scaler.fit_transform(df[["Amount"]])
+
+    # Save both scalers
+    joblib.dump(time_scaler, os.path.join(PROCESSED_DIR, "time_scaler.joblib"))
+    joblib.dump(amount_scaler, os.path.join(PROCESSED_DIR, "amount_scaler.joblib"))
+    logger.info("Scalers saved.")
     return df
 
 
