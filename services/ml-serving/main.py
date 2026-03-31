@@ -98,21 +98,25 @@ def load_model():
     raise RuntimeError(f"Model not found at {model_file}. Run train.py first.")
 
 
-def load_scaler():
-    scaler_file = os.path.join(DATA_DIR, "processed", "scaler.joblib")
-    if os.path.exists(scaler_file):
-        return joblib.load(scaler_file)
-    return None
+def load_scalers():
+    """Load separate Time and Amount scalers."""
+    time_scaler_file = os.path.join(DATA_DIR, "processed", "time_scaler.joblib")
+    amount_scaler_file = os.path.join(DATA_DIR, "processed", "amount_scaler.joblib")
+    time_scaler = joblib.load(time_scaler_file) if os.path.exists(time_scaler_file) else None
+    amount_scaler = joblib.load(amount_scaler_file) if os.path.exists(amount_scaler_file) else None
+    return time_scaler, amount_scaler
 
 
 model = None
-scaler = None
+time_scaler = None
+amount_scaler = None
 EXPLAINER = None
 
 try:
     model = load_model()
-    scaler = load_scaler()
+    time_scaler, amount_scaler = load_scalers()
     EXPLAINER = shap.Explainer(model) if model else None
+    print(f"Model + scalers loaded. time_scaler={time_scaler is not None}, amount_scaler={amount_scaler is not None}")
 except Exception as e:
     print(f"Warning: Could not load model at startup: {e}")
 
@@ -187,9 +191,9 @@ def preprocess(tx: TransactionFeatures | TransactionCreate) -> np.ndarray:
     time_val = d.pop("Time")
     amount_val = d.pop("Amount")
 
-    if scaler:
-        time_scaled = scaler.transform([[time_val, 0]])[0][0]
-        amount_scaled = scaler.transform([[0, amount_val]])[0][0]
+    if time_scaler and amount_scaler:
+        time_scaled = float(time_scaler.transform([[time_val]])[0][0])
+        amount_scaled = float(amount_scaler.transform([[amount_val]])[0][0])
     else:
         time_scaled = time_val
         amount_scaled = amount_val
