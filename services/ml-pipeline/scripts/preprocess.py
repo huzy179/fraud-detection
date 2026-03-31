@@ -16,7 +16,7 @@ import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data")
+DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "..", "data")
 RAW_PATH = os.path.join(DATA_DIR, "raw", "creditcard.csv")
 PROCESSED_DIR = os.path.join(DATA_DIR, "processed")
 os.makedirs(PROCESSED_DIR, exist_ok=True)
@@ -60,7 +60,7 @@ def scale_features(df: pd.DataFrame) -> pd.DataFrame:
 
 def split_data(df: pd.DataFrame, test_size: float = 0.2, random_state: int = 42):
     """Split into train/test sets, stratified on Class."""
-    X = df.drop(columns=["Class", "Time", "Amount"])
+    X = df.drop(columns=["Class"])
     y = df["Class"]
 
     X_train, X_test, y_train, y_test = train_test_split(
@@ -97,12 +97,13 @@ def handle_imbalance(X_train, y_train, strategy: str = "smote", random_state: in
 
 def save_processed_data(X_train, X_test, y_train, y_test):
     """Save processed datasets as Parquet."""
-    for name, df in {
+    data = {
         "X_train": X_train,
         "X_test": X_test,
-        "y_train": y_train,
-        "y_test": y_test,
-    }.items():
+        "y_train": y_train.to_frame(),
+        "y_test": y_test.to_frame(),
+    }
+    for name, df in data.items():
         path = os.path.join(PROCESSED_DIR, f"{name}.parquet")
         df.to_parquet(path)
         logger.info(f"Saved {name} to {path}")

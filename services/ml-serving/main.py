@@ -13,7 +13,7 @@ from contextlib import asynccontextmanager
 import joblib
 import numpy as np
 import xgboost as xgb
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from prometheus_client import Counter, Histogram, Gauge, generate_latest
@@ -34,17 +34,25 @@ PREDICTION_GAUGE = Gauge("fraud_predictions_total", "Total predictions", ["predi
 FRAUD_RATE_GAUGE = Gauge("fraud_rate_estimated", "Estimated fraud rate")
 
 # ── Database Setup ─────────────────────────────────────────────────────────────
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql://postgres:postgres@postgres:5432/fraud_detection"
-)
+def _get_database_url():
+    url = os.getenv("DATABASE_URL", "")
+    if url:
+        return url
+    # SQLite fallback for local dev (no Docker)
+    import pathlib
+    db_path = pathlib.Path(__file__).parent.parent.parent / "fraud_detection.db"
+    return f"sqlite:///{db_path}"
+
+DATABASE_URL = _get_database_url()
+_use_sqlite = DATABASE_URL.startswith("sqlite")
 
 engine = create_engine(
     DATABASE_URL,
-    poolclass=NullPool,
+    poolclass=NullPool if not _use_sqlite else None,
     echo=False,
+    connect_args={"check_same_thread": False} if _use_sqlite else {},
 )
-SessionLocal = sessionmaker(bind=engine)
+SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 Base = declarative_base()
 
 
@@ -202,11 +210,12 @@ def predict_fraud(features: np.ndarray) -> tuple[float, bool, str]:
 # ── Lifespan (startup/shutdown) ────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):  # noqa: ARG001
-    # Startup: create tables
-    Base.metadata.create_all(bind=engine)
-    print("Database tables created.")
+    try:
+        Base.metadata.create_all(bind=engine)
+        print("Database tables ready.")
+    except Exception as e:
+        print(f"Database not available: {e}. Running without DB.")
     yield
-    # Shutdown
     engine.dispose()
     print("Database connection closed.")
 
@@ -281,7 +290,7 @@ async def explain(req: ExplainRequest):
 
 # ── Transaction Endpoints ──────────────────────────────────────────────────────
 @app.post("/transactions", response_model=TransactionResponse, status_code=201)
-async def create_transaction(tx: TransactionCreate, db: Session = None):
+async def create_transaction(tx: TransactionCreate, db: Session = Depends(get_db)):
     """Create a transaction → run fraud prediction → save to database."""
     REQUEST_COUNT.labels(endpoint="/transactions", method="POST").inc()
     start = time.time()
@@ -314,7 +323,6 @@ async def create_transaction(tx: TransactionCreate, db: Session = None):
         confidence=confidence,
     )
 
-    db = SessionLocal()
     try:
         db.add(db_tx)
         db.commit()
@@ -332,44 +340,31 @@ async def create_transaction(tx: TransactionCreate, db: Session = None):
 @app.get("/transactions", response_model=List[TransactionResponse])
 async def list_transactions(
     limit: int = Query(default=100, le=1000),
-    db: Session = None,
+    db: Session = Depends(get_db),
 ):
     """List recent transactions."""
     REQUEST_COUNT.labels(endpoint="/transactions", method="GET").inc()
-    db = SessionLocal()
-    try:
-        txs = db.query(TransactionDB)\
-            .order_by(TransactionDB.created_at.desc())\
-            .limit(limit)\
-            .all()
-        return txs
-    finally:
-        db.close()
+    txs = db.query(TransactionDB)\
+        .order_by(TransactionDB.created_at.desc())\
+        .limit(limit)\
+        .all()
+    return txs
 
 
 @app.get("/transactions/stats", response_model=TransactionStats)
-async def get_stats(db: Session = None):
+async def get_stats(db: Session = Depends(get_db)):
     """Get fraud statistics."""
     REQUEST_COUNT.labels(endpoint="/transactions/stats", method="GET").inc()
-    db = SessionLocal()
-    try:
-        total = db.query(TransactionDB).count()
-        fraud = db.query(TransactionDB).filter(TransactionDB.is_fraud == True).count()
-        result = db.query(
-            TransactionDB.fraud_probability
-        ).all()
-        avg_prob = (
-            sum(r[0] for r in result) / len(result)
-            if result else 0.0
-        )
-        return TransactionStats(
-            total_transactions=total,
-            fraud_count=fraud,
-            fraud_rate=round((fraud / total * 100), 4) if total > 0 else 0.0,
-            avg_fraud_probability=round(avg_prob, 6),
-        )
-    finally:
-        db.close()
+    total = db.query(TransactionDB).count()
+    fraud = db.query(TransactionDB).filter(TransactionDB.is_fraud == True).count()
+    result = db.query(TransactionDB.fraud_probability).all()
+    avg_prob = sum(r[0] for r in result) / len(result) if result else 0.0
+    return TransactionStats(
+        total_transactions=total,
+        fraud_count=fraud,
+        fraud_rate=round((fraud / total * 100), 4) if total > 0 else 0.0,
+        avg_fraud_probability=round(avg_prob, 6),
+    )
 
 
 # ── Prometheus Metrics ──────────────────────────────────────────────────────────
