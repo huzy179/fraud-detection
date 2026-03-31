@@ -24,7 +24,9 @@
       "Bash(python3 -c \":*)",
       "Bash(/opt/anaconda3/bin/python3 -c \":*)",
       "Bash(ls -lh /Users/maitranhuy/fraud-detection/docs/*.png)",
-      "Bash(pytest /Users/maitranhuy/fraud-detection/services/ml-serving/tests/test_main.py -v)"
+      "Bash(pytest /Users/maitranhuy/fraud-detection/services/ml-serving/tests/test_main.py -v)",
+      "Bash(MLFLOW_TRACKING_URI=\"\" python3 services/ml-pipeline/scripts/train.py)",
+      "Bash(MLFLOW_TRACKING_URI=\"\" /opt/anaconda3/bin/python3 services/ml-pipeline/scripts/train.py)"
     ]
   }
 }

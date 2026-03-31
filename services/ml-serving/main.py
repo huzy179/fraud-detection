@@ -13,6 +13,7 @@ from contextlib import asynccontextmanager
 import joblib
 import numpy as np
 import xgboost as xgb
+import lightgbm as lgb
 from fastapi import FastAPI, HTTPException, Query, Depends
 from fastapi.responses import PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -86,17 +87,29 @@ def get_db():
 # ── ML Model Loading ───────────────────────────────────────────────────────────
 MODEL_PATH = os.getenv("MODEL_PATH", os.path.join(os.path.dirname(__file__), "models"))
 DATA_DIR = os.getenv("DATA_DIR", os.path.join(os.path.dirname(__file__), "..", "..", "data"))
-FRAUD_THRESHOLD = float(os.getenv("FRAUD_THRESHOLD", "0.5"))
+FRAUD_THRESHOLD = float(os.getenv("FRAUD_THRESHOLD", "0.93"))  # tuned threshold
 
 
 def load_model():
-    model_file = os.path.join(MODEL_PATH, "xgboost_model.json")
-    if os.path.exists(model_file):
+    """Load best available model: LightGBM (primary) or XGBoost (fallback)."""
+    import lightgbm as _lgb
+    lgbm_path = os.path.join(MODEL_PATH, "lgbm_model.txt")
+    if os.path.exists(lgbm_path):
+        model = _lgb.Booster(model_file=lgbm_path)
+        print(f"LightGBM model loaded from {lgbm_path}")
+        return ("lightgbm", model)
+
+    xgb_path = os.path.join(MODEL_PATH, "xgboost_model.json")
+    if os.path.exists(xgb_path):
         model = xgb.XGBClassifier()
-        model.load_model(model_file)
-        print(f"Model loaded from {model_file}")
-        return model
-    raise RuntimeError(f"Model not found at {model_file}. Run train.py first.")
+        model.load_model(xgb_path)
+        print(f"XGBoost model loaded from {xgb_path}")
+        return ("xgboost", model)
+
+    raise RuntimeError(
+        f"No model found in {MODEL_PATH}. "
+        "Run train.py first to generate lgbm_model.txt or xgboost_model.json."
+    )
 
 
 def load_scalers():
@@ -109,12 +122,13 @@ def load_scalers():
 
 
 model = None
+model_type = None
 time_scaler = None
 amount_scaler = None
 EXPLAINER = None
 
 try:
-    model = load_model()
+    model_type, model = load_model()
     time_scaler, amount_scaler = load_scalers()
     EXPLAINER = shap.Explainer(model) if model else None
     print(f"Model + scalers loaded. time_scaler={time_scaler is not None}, amount_scaler={amount_scaler is not None}")
@@ -206,7 +220,11 @@ def preprocess(tx: TransactionFeatures | TransactionCreate) -> np.ndarray:
 
 def predict_fraud(features: np.ndarray) -> tuple[float, bool, str]:
     """Run model inference, return (probability, is_fraud, confidence)."""
-    prob = float(model.predict_proba(features)[0][1])
+    global model_type, model
+    if model_type == "lightgbm":
+        prob = float(model.predict(features)[0])
+    else:
+        prob = float(model.predict_proba(features)[0][1])
     is_fraud = prob >= FRAUD_THRESHOLD
     confidence = "high" if prob >= 0.8 else "medium" if prob >= 0.5 else "low"
     return prob, is_fraud, confidence
