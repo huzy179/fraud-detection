@@ -13,7 +13,6 @@ from contextlib import asynccontextmanager
 import joblib
 import numpy as np
 import xgboost as xgb
-import lightgbm as lgb
 from fastapi import FastAPI, HTTPException, Query, Depends
 from fastapi.responses import PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -92,14 +91,20 @@ FRAUD_THRESHOLD = float(os.getenv("FRAUD_THRESHOLD", "0.93"))  # tuned threshold
 
 def load_model():
     """Load best available model: LightGBM (primary) or XGBoost (fallback)."""
-    import lightgbm as _lgb
-    lgbm_path = os.path.join(MODEL_PATH, "lgbm_model.txt")
-    if os.path.exists(lgbm_path):
-        model = _lgb.Booster(model_file=lgbm_path)
-        print(f"LightGBM model loaded from {lgbm_path}")
-        return ("lightgbm", model)
-
     xgb_path = os.path.join(MODEL_PATH, "xgboost_model.json")
+
+    # Try LightGBM first (better performance)
+    try:
+        import lightgbm as _lgb
+        lgbm_path = os.path.join(MODEL_PATH, "lgbm_model.txt")
+        if os.path.exists(lgbm_path):
+            model = _lgb.Booster(model_file=lgbm_path)
+            print(f"LightGBM model loaded from {lgbm_path}")
+            return ("lightgbm", model)
+    except (ImportError, OSError) as e:
+        print(f"LightGBM not available ({e}), using XGBoost...")
+
+    # Fallback to XGBoost
     if os.path.exists(xgb_path):
         model = xgb.XGBClassifier()
         model.load_model(xgb_path)
@@ -264,7 +269,7 @@ app.add_middleware(
 async def health_check():
     if model is None:
         raise HTTPException(status_code=503, detail="Model not loaded")
-    return {"status": "healthy", "model_loaded": True, "threshold": FRAUD_THRESHOLD}
+    return {"status": "healthy", "model_loaded": True, "model_type": model_type, "threshold": FRAUD_THRESHOLD}
 
 
 @app.post("/predict", response_model=PredictionResponse)
