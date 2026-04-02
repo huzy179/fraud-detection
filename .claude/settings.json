@@ -27,7 +27,27 @@
       "Bash(pytest /Users/maitranhuy/fraud-detection/services/ml-serving/tests/test_main.py -v)",
       "Bash(MLFLOW_TRACKING_URI=\"\" python3 services/ml-pipeline/scripts/train.py)",
       "Bash(MLFLOW_TRACKING_URI=\"\" /opt/anaconda3/bin/python3 services/ml-pipeline/scripts/train.py)",
-      "Bash(ls -lh /Users/maitranhuy/fraud-detection/data/processed/*.joblib)"
+      "Bash(ls -lh /Users/maitranhuy/fraud-detection/data/processed/*.joblib)",
+      "Bash(python3 -m json.tool echo \"\")",
+      "Bash(curl -s -X POST http://localhost:8000/predict -H \"Content-Type: application/json\" -d '{\"\"\"\"transaction\"\"\"\":{\"\"\"\"V1\"\"\"\":-1.359,\"\"\"\"V2\"\"\"\":-0.072,\"\"\"\"V3\"\"\"\":2.536,\"\"\"\"V4\"\"\"\":1.378,\"\"\"\"V5\"\"\"\":-0.338,\"\"\"\"V6\"\"\"\":0.462,\"\"\"\"V7\"\"\"\":0.239,\"\"\"\"V8\"\"\"\":0.098,\"\"\"\"V9\"\"\"\":-0.664,\"\"\"\"V10\"\"\"\":0.463,\"\"\"\"V11\"\"\"\":-0.931,\"\"\"\"V12\"\"\"\":-2.304,\"\"\"\"V13\"\"\"\":0.772,\"\"\"\"V14\"\"\"\":-1.576,\"\"\"\"V15\"\"\"\":-0.230,\"\"\"\"V16\"\"\"\":-0.050,\"\"\"\"V17\"\"\"\":-0.844,\"\"\"\"V18\"\"\"\":-0.380,\"\"\"\"V19\"\"\"\":0.597,\"\"\"\"V20\"\"\"\":-0.697,\"\"\"\"V21\"\"\"\":-0.055,\"\"\"\"V22\"\"\"\":-0.270,\"\"\"\"V23\"\"\"\":-0.233,\"\"\"\"V24\"\"\"\":0.140,\"\"\"\"V25\"\"\"\":-0.052,\"\"\"\"V26\"\"\"\":0.265,\"\"\"\"V27\"\"\"\":0.825,\"\"\"\"V28\"\"\"\":-0.068,\"\"\"\"Amount\"\"\"\":49.99,\"\"\"\"Time\"\"\"\":40680}}')",
+      "Bash(curl -s http://localhost:8000/metrics)",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\" http://localhost:3000 echo \"\")",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\" http://localhost:3002 echo \"\")",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\" http://localhost:9090 echo \"\")",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\" http://localhost:5001)",
+      "Bash(python -m pytest tests/test_main.py -v --tb=short)",
+      "Bash(curl -s http://localhost:9090/-/healthy)",
+      "Bash(curl -s http://localhost:3002/api/health)",
+      "Bash(curl -s -X POST http://localhost:8000/predict -H \"Content-Type: application/json\" -d '{\"transaction\": {\"V1\": -3.043, \"V2\": 3.033, \"V3\": -1.833, \"V4\": 2.531, \"V5\": -3.136, \"V6\": 1.874, \"V7\": -4.731, \"V8\": 3.201, \"V9\": 1.716, \"V10\": -1.223, \"V11\": 2.301, \"V12\": -2.842, \"V13\": -2.011, \"V14\": 2.671, \"V15\": -1.099, \"V16\": -3.219, \"V17\": 3.914, \"V18\": -1.915, \"V19\": 1.199, \"V20\": -0.434, \"V21\": 0.570, \"V22\": -0.055, \"V23\": -2.074, \"V24\": 0.808, \"V25\": -0.253, \"V26\": 1.110, \"V27\": 0.921, \"V28\": -0.054, \"Amount\": 999.99, \"Time\": 85400}}')",
+      "Bash(python3 -c \"import joblib; print\\('joblib ok'\\)\")",
+      "Bash(conda run:*)",
+      "Bash(conda info:*)",
+      "Read(//Users/maitranhuy/anaconda3/**)",
+      "Read(//Users/maitranhuy/miniconda3/**)",
+      "Bash(/opt/anaconda3/envs/ml_env/bin/python -c \"import xgboost; import lightgbm; print\\('both ok'\\)\")",
+      "Bash(ls /Users/maitranhuy/fraud-detection/docker*)",
+      "Bash(python3 -c ':*)",
+      "Bash(/opt/anaconda3/envs/fullstack/bin/python -c ':*)"
     ]
   }
 }

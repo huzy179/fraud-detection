@@ -86,7 +86,7 @@ def get_db():
 # ── ML Model Loading ───────────────────────────────────────────────────────────
 MODEL_PATH = os.getenv("MODEL_PATH", os.path.join(os.path.dirname(__file__), "models"))
 DATA_DIR = os.getenv("DATA_DIR", os.path.join(os.path.dirname(__file__), "..", "..", "data"))
-FRAUD_THRESHOLD = float(os.getenv("FRAUD_THRESHOLD", "0.93"))  # tuned threshold
+FRAUD_THRESHOLD = float(os.getenv("FRAUD_THRESHOLD", "0.5"))  # tuned threshold
 
 
 def load_model():
@@ -227,7 +227,7 @@ def predict_fraud(features: np.ndarray) -> tuple[float, bool, str]:
     """Run model inference, return (probability, is_fraud, confidence)."""
     global model_type, model
     if model_type == "lightgbm":
-        prob = float(model.predict(features)[0])
+        prob = float(model.predict_proba(features)[0][1])
     else:
         prob = float(model.predict_proba(features)[0][1])
     is_fraud = prob >= FRAUD_THRESHOLD
