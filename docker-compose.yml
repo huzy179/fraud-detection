@@ -35,6 +35,7 @@ services:
       --default-artifact-root /app/mlflow_artifacts
       --host 0.0.0.0
       --port 5000
+      --allowed-hosts "*"
     environment:
       MLFLOW_TRACKING_URI: postgresql://postgres:postgres@postgres:5432/mlflow_db
     depends_on:
@@ -44,20 +45,21 @@ services:
   # ─── API Server (FastAPI — ML Inference + Transactions + DB) ──────────────
   api:
     build:
-      context: ./services/ml-serving
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: services/ml-serving/Dockerfile
     container_name: fraud_api
     ports:
       - "8000:8000"
     volumes:
-      - ./services/ml-serving/models:/app/models
-      - ./data/processed:/app/data/processed
+      - ./models:/app/models
       - ./data:/app/data
     environment:
       FRAUD_THRESHOLD: "0.93"
       MODEL_PATH: /app/models
       DATA_DIR: /app/data
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/fraud_detection
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MLFLOW_ARTIFACT_ROOT: /app/mlflow_artifacts
     depends_on:
       postgres:
         condition: service_healthy

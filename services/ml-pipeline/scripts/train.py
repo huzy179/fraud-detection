@@ -42,15 +42,24 @@ USE_MLFLOW = MLFLOW_TRACKING_URI not in ("", "false", "None") and MLFLOW_AVAILAB
 
 # Artifact staging: client writes locally before uploading to server.
 # Must be a writable directory on the HOST (where this script runs).
-# Points to the bind-mounted folder that matches the container's /app/mlflow_artifacts.
-_artifact_root = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "mlflow_artifacts"
+_artifact_root = os.getenv(
+    "MLFLOW_ARTIFACT_ROOT",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "mlflow_artifacts")
 )
 os.environ["MLFLOW_ARTIFACT_ROOT"] = _artifact_root
+logger.info(f"MLflow tracking: {MLFLOW_TRACKING_URI}")
 logger.info(f"MLflow artifact root (client): {_artifact_root}")
 
-PROCESSED_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "processed")
-MODELS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "..", "models")
+# Resolve relative to the actual script location, not symlink/copy path.
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+# Detect container environment: /app is writable, data is at /app/data/processed
+if os.path.exists("/app/data/processed"):
+    PROCESSED_DIR = "/app/data/processed"
+    MODELS_DIR = "/app/models"
+else:
+    # Host: project root is 3 levels up from scripts/
+    PROCESSED_DIR = os.path.normpath(os.path.join(_script_dir, "..", "..", "data", "processed"))
+    MODELS_DIR = os.path.normpath(os.path.join(_script_dir, "..", "..", "models"))
 os.makedirs(MODELS_DIR, exist_ok=True)
 
 
@@ -171,24 +180,49 @@ def train_with_cv(model_cfg, model_name, X_train, y_train, X_test, y_test):
     if model_name == "XGBoost":
         path = os.path.join(MODELS_DIR, "xgboost_model.json")
         final_model.save_model(path)
-        if USE_MLFLOW:
-            mlflow.xgboost.log_model(final_model, "xgboost_model",
-                                     registered_model_name="FraudDetector")
     elif model_name == "LightGBM":
         path = os.path.join(MODELS_DIR, "lgbm_model.txt")
         final_model.booster_.save_model(path)
-        if USE_MLFLOW:
-            mlflow.lightgbm.log_model(final_model, "lgbm_model",
-                                     registered_model_name="FraudDetector")
     else:
         path = os.path.join(MODELS_DIR, "rf_model.joblib")
         joblib.dump(final_model, path)
-        if USE_MLFLOW:
-            mlflow.sklearn.log_model(final_model, "rf_model",
-                                    registered_model_name="FraudDetector")
 
     logger.info(f"Saved: {path}")
     return final_model, metrics_opt, optimal_t
+
+
+def _train_with_mlflow(model_cfg, model_name, X_train, y_train, X_test, y_test):
+    """Wrapper: runs train_with_cv inside an MLflow active run, logs model + metrics."""
+    if USE_MLFLOW:
+        try:
+            with mlflow.start_run(run_name=model_name) as run:
+                mlflow.set_tag("model_type", model_name)
+                result = train_with_cv(model_cfg, model_name, X_train, y_train, X_test, y_test)
+                final_model = result[0]
+                metrics_opt = result[1]
+
+                # Log model params (skip booster-specific keys)
+                skip_keys = {"booster", "device"}
+                clean_cfg = {k: v for k, v in model_cfg.items() if k not in skip_keys}
+                mlflow.log_params(clean_cfg)
+
+                # Log best metrics
+                mlflow.log_metrics(metrics_opt)
+
+                # Log model to artifact store
+                if model_name == "XGBoost":
+                    mlflow.xgboost.log_model(final_model, "xgboost_model",
+                                             registered_model_name="FraudDetector")
+                elif model_name == "LightGBM":
+                    mlflow.lightgbm.log_model(final_model, "lgbm_model",
+                                             registered_model_name="FraudDetector")
+                else:
+                    mlflow.sklearn.log_model(final_model, "rf_model",
+                                             registered_model_name="FraudDetector")
+                return result
+        except Exception as e:
+            logger.warning(f"MLflow run failed for {model_name}: {e}, falling back to local only.")
+    return train_with_cv(model_cfg, model_name, X_train, y_train, X_test, y_test)
 
 
 def main():
@@ -203,6 +237,7 @@ def main():
             mlflow.set_experiment("fraud_detection_improved")
         except Exception as e:
             logger.warning(f"MLflow unavailable: {e}, continuing without tracking.")
+            globals()["USE_MLFLOW"] = False
 
     X_train, X_test, y_train, y_test = load_data()
 
@@ -212,7 +247,9 @@ def main():
         scale_pos_weight=(y_train == 0).sum() / max((y_train == 1).sum(), 1),
         random_state=42,
     )
-    xgb_model, xgb_metrics, xgb_t = train_with_cv(xgb_params, "XGBoost", X_train, y_train, X_test, y_test)
+    xgb_model, xgb_metrics, xgb_t = _train_with_mlflow(
+        xgb_params, "XGBoost", X_train, y_train, X_test, y_test
+    )
 
     # ── LightGBM ──
     lgb_params = dict(
@@ -220,14 +257,18 @@ def main():
         scale_pos_weight=(y_train == 0).sum() / max((y_train == 1).sum(), 1),
         random_state=42,
     )
-    lgb_model, lgb_metrics, lgb_t = train_with_cv(lgb_params, "LightGBM", X_train, y_train, X_test, y_test)
+    lgb_model, lgb_metrics, lgb_t = _train_with_mlflow(
+        lgb_params, "LightGBM", X_train, y_train, X_test, y_test
+    )
 
     # ── RandomForest ──
     rf_params = dict(
         n_estimators=200, max_depth=12, min_samples_split=5,
         class_weight="balanced", random_state=42, n_jobs=-1,
     )
-    rf_model, rf_metrics, rf_t = train_with_cv(rf_params, "RandomForest", X_train, y_train, X_test, y_test)
+    rf_model, rf_metrics, rf_t = _train_with_mlflow(
+        rf_params, "RandomForest", X_train, y_train, X_test, y_test
+    )
 
     # ── Summary ──
     all_models = [
