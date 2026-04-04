@@ -13,17 +13,10 @@
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5001)",
       "Bash(docker exec:*)",
       "Bash(docker restart:*)",
-      "Bash(python3 /Users/maitranhuy/fraud-detection/data/scripts/seed_data.py)",
       "Bash(curl -s http://localhost:8000/transactions/stats)",
       "Bash(python3 -m json.tool)",
       "Bash(curl -s http://localhost:3000)",
       "Bash(curl -s http://localhost:8000/transactions)",
-      "Bash(python3 -c \"import notebook; print\\(''notebook ok''\\)\")",
-      "Bash(jupyter nbconvert:*)",
-      "Bash(papermill notebooks/01_eda.ipynb notebooks/01_eda_executed.ipynb --kernel python3)",
-      "Bash(python3 -c \":*)",
-      "Bash(/opt/anaconda3/bin/python3 -c \":*)",
-      "Bash(ls -lh /Users/maitranhuy/fraud-detection/docs/*.png)",
       "Bash(pytest /Users/maitranhuy/fraud-detection/services/ml-serving/tests/test_main.py -v)",
       "Bash(MLFLOW_TRACKING_URI=\"\" python3 services/ml-pipeline/scripts/train.py)",
       "Bash(MLFLOW_TRACKING_URI=\"\" /opt/anaconda3/bin/python3 services/ml-pipeline/scripts/train.py)",
@@ -54,7 +47,13 @@
       "Read(//System/Volumes/Data/home/user/fraud-detection/services/ml-serving/**)",
       "Read(//home/user/fraud-detection/monitoring/**)",
       "Read(//System/Volumes/Data/home/user/fraud-detection/monitoring/**)",
-      "Bash(curl -s -u \"admin:admin\" \"http://localhost:3002/api/datasources\")"
+      "Bash(curl -s -u \"admin:admin\" \"http://localhost:3002/api/datasources\")",
+      "Bash(cat monitoring/grafana/provisioning/datasources/*.yaml monitoring/grafana/provisioning/datasources/*.json)",
+      "Bash(rm -f fraud_detection.db test_*.db)",
+      "Bash(ls -la *.db)"
+    ],
+    "additionalDirectories": [
+      "/Users/maitranhuy/fraud-detection/services/ml-serving"
     ]
   }
 }
