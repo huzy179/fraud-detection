@@ -40,6 +40,15 @@ logger = logging.getLogger(__name__)
 MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5001")
 USE_MLFLOW = MLFLOW_TRACKING_URI not in ("", "false", "None") and MLFLOW_AVAILABLE
 
+# Artifact staging: client writes locally before uploading to server.
+# Must be a writable directory on the HOST (where this script runs).
+# Points to the bind-mounted folder that matches the container's /app/mlflow_artifacts.
+_artifact_root = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "mlflow_artifacts"
+)
+os.environ["MLFLOW_ARTIFACT_ROOT"] = _artifact_root
+logger.info(f"MLflow artifact root (client): {_artifact_root}")
+
 PROCESSED_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "processed")
 MODELS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "..", "models")
 os.makedirs(MODELS_DIR, exist_ok=True)

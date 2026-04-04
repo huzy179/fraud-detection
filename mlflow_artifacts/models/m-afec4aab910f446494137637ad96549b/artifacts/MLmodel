@@ -1,0 +1,21 @@
+artifact_path: /Users/maitranhuy/fraud-detection/mlflow_artifacts/models/m-afec4aab910f446494137637ad96549b/artifacts
+flavors:
+  python_function:
+    data: model.ubj
+    env:
+      conda: conda.yaml
+      virtualenv: python_env.yaml
+    loader_module: mlflow.xgboost
+    python_version: 3.13.5
+  xgboost:
+    code: null
+    data: model.ubj
+    model_class: xgboost.sklearn.XGBClassifier
+    model_format: ubj
+    xgb_version: 3.2.0
+mlflow_version: 3.10.1
+model_id: m-afec4aab910f446494137637ad96549b
+model_size_bytes: 996229
+model_uuid: m-afec4aab910f446494137637ad96549b
+prompts: null
+utc_time_created: '2026-04-04 14:30:04.756136'

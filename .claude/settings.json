@@ -47,7 +47,14 @@
       "Bash(/opt/anaconda3/envs/ml_env/bin/python -c \"import xgboost; import lightgbm; print\\('both ok'\\)\")",
       "Bash(ls /Users/maitranhuy/fraud-detection/docker*)",
       "Bash(python3 -c ':*)",
-      "Bash(/opt/anaconda3/envs/fullstack/bin/python -c ':*)"
+      "Bash(/opt/anaconda3/envs/fullstack/bin/python -c ':*)",
+      "Read(//home/user/fraud-detection/**)",
+      "Read(//System/Volumes/Data/home/user/fraud-detection/**)",
+      "Read(//home/user/fraud-detection/services/ml-serving/**)",
+      "Read(//System/Volumes/Data/home/user/fraud-detection/services/ml-serving/**)",
+      "Read(//home/user/fraud-detection/monitoring/**)",
+      "Read(//System/Volumes/Data/home/user/fraud-detection/monitoring/**)",
+      "Bash(curl -s -u \"admin:admin\" \"http://localhost:3002/api/datasources\")"
     ]
   }
 }

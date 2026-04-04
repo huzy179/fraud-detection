@@ -387,10 +387,12 @@ async def get_stats(db: Session = Depends(get_db)):
     fraud = db.query(TransactionDB).filter(TransactionDB.is_fraud == True).count()
     result = db.query(TransactionDB.fraud_probability).all()
     avg_prob = sum(r[0] for r in result) / len(result) if result else 0.0
+    fraud_rate_val = (fraud / total * 100) if total > 0 else 0.0
+    FRAUD_RATE_GAUGE.set(fraud_rate_val / 100)
     return TransactionStats(
         total_transactions=total,
         fraud_count=fraud,
-        fraud_rate=round((fraud / total * 100), 4) if total > 0 else 0.0,
+        fraud_rate=round(fraud_rate_val, 4),
         avg_fraud_probability=round(avg_prob, 6),
     )
 
