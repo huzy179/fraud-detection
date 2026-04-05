@@ -6,9 +6,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 && rm 
 
 COPY services/ml-pipeline/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir evidently[ui] sqlalchemy psycopg2-binary
 
 COPY services/ml-pipeline/scripts/ ./scripts/
 COPY data/ ./data/
+COPY models/ ./models/
 
 ENV PYTHONPATH=/app
 ENV MLFLOW_TRACKING_URI=http://mlflow:5000

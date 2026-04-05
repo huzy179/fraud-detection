@@ -53,7 +53,10 @@
       "Bash(ls -la *.db)",
       "Bash(docker-compose logs:*)",
       "Bash(docker-compose ps:*)",
-      "Bash(docker-compose config:*)"
+      "Bash(docker-compose config:*)",
+      "Bash(mkdir -p actions-runner)",
+      "Bash(curl -L https://github.com/actions/runner/releases/download/v2.322.0/actions-runner-linux-x64-2.322.0.tar.gz)",
+      "Bash(tar xz:*)"
     ],
     "additionalDirectories": [
       "/Users/maitranhuy/fraud-detection/services/ml-serving"
