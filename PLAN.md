@@ -1,65 +1,46 @@
 # PLAN — Fraud Detection End-to-End ML Ops
 
-## Cấu trúc hiện tại (sau khi dọn dẹp)
+## Cấu trúc hiện tại (sau dọn dẹp)
 
 ```
 fraud-detection/
-├── .env.example
-├── .gitignore
-├── PLAN.md
-├── README.md
 ├── docker-compose.yml
-├── mlflow_artifacts/           ← trống, docker-compose mount vào
+├── mlflow.db
 ├── models/
-│   └── xgboost_model.json     ← model đã train
+│   ├── xgboost_model.json      (1.5MB, threshold=0.94)
+│   ├── lgbm_model.txt          (1.0MB, threshold=0.93) ← ACTIVE
+│   ├── rf_model.joblib          (6.8MB, threshold=0.89)
+│   └── best_config.json         (LightGBM best)
 ├── data/
-│   ├── raw/creditcard.csv     ← dữ liệu gốc
-│   ├── processed/             ← đã preprocess (parquet + scaler)
+│   ├── raw/creditcard.csv      (98MB)
+│   ├── processed/               (parquet + scalers)
 │   └── scripts/download_data.py
 ├── services/
-│   ├── ml-pipeline/
-│   │   ├── Dockerfile
-│   │   ├── requirements.txt
-│   │   └── scripts/
-│   │       ├── preprocess.py
-│   │       └── train.py
-│   ├── ml-serving/
-│   │   ├── Dockerfile
-│   │   ├── main.py
-│   │   ├── requirements.txt
-│   │   └── tests/test_main.py
-│   └── frontend/
-│       ├── Dockerfile
-│       ├── package.json / package-lock.json
-│       ├── next.config.js
-│       ├── tsconfig.json
-│       ├── .dockerignore
-│       ├── pages/
-│       │   ├── _app.tsx
-│       │   └── index.tsx
-│       └── styles/globals.css
-└── monitoring/
-    ├── prometheus.yml
-    └── grafana/provisioning/
-        ├── dashboards/
-        │   ├── dashboard.yml
-        │   └── fraud-api.json
-        └── datasources/
-            └── prometheus.yml     ← datasource cho Grafana ✅
+│   ├── ml-pipeline/            (Dockerfile, preprocess.py, train.py)
+│   ├── ml-serving/             (Dockerfile, main.py, tests/)
+│   └── frontend/               (Dockerfile, pages/, styles/)
+├── monitoring/
+│   ├── prometheus.yml
+│   └── grafana/provisioning/
+│       ├── dashboards/fraud-api.json + dashboard.yml
+│       └── datasources/prometheus.yml
+├── mlflow_artifacts/            (MLflow run artifacts)
+└── .claude/settings.json
 ```
 
 ---
 
-## Luồng ML Ops (từ README)
+## Luồng ML Ops
 
 ```
 Data (raw CSV)
     ↓ download_data.py
 Preprocess (StandardScaler, split, SMOTE)
     ↓ preprocess.py
-Train (XGBoost)
-    ↓ train.py → xgboost_model.json + best_config.json
-MLflow (log metrics, model registry)
+Train (XGBoost + LightGBM + RandomForest)
+    ↓ train.py → models/*.json, *.txt, *.joblib
+    ↓ MLflow log runs + artifacts
+MLflow Server (PostgreSQL backend)
     ↓
 API Server (FastAPI) ← model + scalers + PostgreSQL
     ↓
@@ -72,97 +53,57 @@ Grafana (dashboard)
 
 ---
 
-## Tổng hợp những gì CÓ rồi vs CHƯA CÓ
+## Tình trạng hiện tại
 
-### ✅ Đã có (không cần sửa)
+### ✅ Đã xong
 
-| Component | File | Trạng thái |
-|---|---|---|
-| Download data | `data/scripts/download_data.py` | ✅ OK |
-| Preprocess | `services/ml-pipeline/scripts/preprocess.py` | ✅ OK |
-| Train (XGBoost) | `services/ml-pipeline/scripts/train.py` | ✅ OK |
-| Model | `models/xgboost_model.json` | ✅ OK (16MB) |
-| Data processed | `data/processed/*.parquet, *_scaler.joblib` | ✅ OK |
-| MLflow server | `docker-compose.yml` (mlflow service) | ✅ OK |
-| API Server | `services/ml-serving/main.py` | ✅ OK |
-| Prometheus config | `monitoring/prometheus.yml` | ✅ OK |
-| Grafana datasource | `monitoring/grafana/provisioning/datasources/prometheus.yml` | ✅ OK |
-| Grafana dashboard | `monitoring/grafana/provisioning/dashboards/fraud-api.json` | ✅ OK |
-| Docker compose | `docker-compose.yml` | ✅ OK |
-| MLflow datasource | `monitoring/grafana/provisioning/datasources/prometheus.yml` | ✅ OK |
-| Frontend Dockerfile | `services/frontend/Dockerfile` | ✅ OK |
-| ml-pipeline Dockerfile | `services/ml-pipeline/Dockerfile` | ✅ OK |
-| ml-serving Dockerfile | `services/ml-serving/Dockerfile` | ✅ OK |
+| Component | Trạng thái |
+|---|---|
+| Dọn dẹp file/folder thừa | ✅ |
+| docker-compose.yml (xóa version, healthcheck, depends_on) | ✅ |
+| train.py (wait_for_mlflow, log_artifact, path fix) | ✅ |
+| ml-pipeline Dockerfile (libgomp1, paths) | ✅ |
+| preprocess.py (path fix) | ✅ |
+| XGBoost + LightGBM + RandomForest trained | ✅ |
+| MLflow runs + artifacts logged | ✅ |
+| best_config.json created | ✅ |
+| README.md cập nhật model performance | ✅ |
+| Old test runs deleted | ✅ |
+| Prometheus scrape api | ✅ |
+| Version field xóa khỏi docker-compose | ✅ |
 
-### ❌ Vấn đề cần fix
+### ⚠️ Cần kiểm tra thêm
 
-| # | Vấn đề | Ảnh hưởng | Ưu tiên |
-|---|---|---|---|
-| 1 | `docker-compose.yml`: api service **không có healthcheck** | Prometheus scrape fail/race condition | 🔴 Cao |
-| 2 | `docker-compose.yml`: prometheus **không đợi** api healthy | Metrics miss early data 0-30s | 🔴 Cao |
-| 3 | `train.py`: MLflow fallback **silent** — không log rõ khi kết nối thất bại | MLflow UI trắng, không hiểu tại sao | 🔴 Cao |
-| 4 | `docker-compose.yml`: ml-pipeline **không có** `depends_on` mlflow healthy | Run train khi MLflow chưa up → silent fail | 🟡 Trung |
-| 5 | `models/` **thiếu** `best_config.json` (file này chưa được tạo ở đâu) | API đọc threshold từ đâu? | 🟡 Trung |
-| 6 | `docker-compose.yml`: thứ tự depends_on chưa rõ ràng | Khó debug khi có lỗi | 🟡 Trung |
+| Component | Cần check |
+|---|---|
+| Grafana datasource | Có kết nối Prometheus chưa? (http_code 000 lúc check gần nhất) |
+| Grafana dashboard | Có hiển thị metrics không? |
+| API threshold | Đang dùng 0.93 hay 0.5? |
+| best_config.json threshold | Có được API đọc không? |
 
 ---
 
-## Các bước thực hiện (từng bước, xong bước này → xác nhận → bước sau)
+## Các bước tiếp theo (nếu cần)
 
-### Bước 1 — Fix docker-compose.yml (healthcheck + depends_on)
-**Mục tiêu:** Đảm bảo thứ tự khởi động đúng và Prometheus scrape được ngay từ đầu.
+### Bước A — Kiểm tra Grafana
+- Check http://localhost:3002 xem dashboard
+- Kiểm tra datasource Prometheus có kết nối không
 
-Cần sửa:
-- Thêm `healthcheck` vào `api` service (endpoint `/health`)
-- Thêm `depends_on` mlflow → **health condition** vào ml-pipeline
-- Prometheus `depends_on` → đợi `api:service_healthy`
-- ml-pipeline: đợi `mlflow:service_healthy` trước khi train
+### Bước B — Kiểm tra API threshold
+- API đọc `FRAUD_THRESHOLD=0.93` từ env
+- Nhưng `main.py` hardcoded fallback 0.5
+- Cần verify API đang dùng threshold nào
 
-### Bước 2 — Fix train.py (MLflow logging rõ ràng)
-**Mục tiêu:** Khi MLflow kết nối thất bại, log rõ ràng thay vì silent fallback.
+### Bước C — Test Prometheus metrics
+- Gửi request lên API → check Prometheus scrape được không
+- Check Grafana dashboard có data không
 
-Cần sửa:
-- Thêm `wait_for_mlflow()` function — retry kết nối với timeout
-- Log: `"MLflow connected ✅"` hoặc `"MLflow unavailable, running local-only"`
-- Đảm bảo runs được ghi đúng vào MLflow server (không fallback local)
-- Tạo `models/best_config.json` sau khi train xong
-
-### Bước 3 — Kiểm tra API đọc model đúng chỗ
-**Mục tiêu:** API phải load được model + scaler từ Docker volume.
-
-Cần kiểm:
-- `MODEL_PATH` mount trong docker-compose đúng chưa?
-- `FRAUD_THRESHOLD` đọc từ env hay hardcoded?
-- Scaler paths có đúng không?
-
-### Bước 4 — Test toàn bộ luồng với docker-compose
-**Mục tiêu:** Toàn bộ stack chạy, MLflow + Prometheus + Grafana hiển thị data.
-
-Commands:
-```bash
-docker-compose down -v
-docker-compose up --build
-docker-compose ps                    # tất cả healthy
-docker-compose logs mlflow            # MLflow up
-docker-compose logs api               # model loaded
-docker-compose logs ml-pipeline       # train xong
-curl http://localhost:5001            # MLflow UI
-curl http://localhost:9090/api/v1/query?query=fraud_api_requests_total  # Prometheus
-curl http://localhost:8000/health    # API
-http://localhost:3000                # Frontend
-http://localhost:3002                # Grafana
-```
-
-### Bước 5 — Verify Prometheus scrape + Grafana dashboard
-**Mục tiêu:** Prometheus scrape được metrics, Grafana hiển thị.
-
-Check:
-- Prometheus targets: `http://localhost:9090/targets`
-- Grafana → Dashboards → Fraud Detection API → có data hiển thị
+### Bước D — Commit code
+- Sau khi mọi thứ ổn, commit toàn bộ thay đổi
 
 ---
 
-## Debug checklist (sau khi fix xong)
+## Debug checklist
 
 ```
 1. docker-compose ps
@@ -172,25 +113,19 @@ Check:
    → prometheus: running ✅
    → grafana:    running ✅
 
-2. docker-compose logs mlflow | grep "Uvicorn running"
-   → MLflow UI accessible at :5001
-
-3. docker-compose logs ml-pipeline | grep "MLflow"
-   → "MLflow connected ✅" HOẶC "MLflow unavailable, local-only"
-
-4. http://localhost:5001
-   → Có experiments trong MLflow UI
-
-5. curl http://localhost:8000/health
+2. curl http://localhost:8000/health
    → {"status": "healthy", "model_loaded": true, ...}
 
-6. curl http://localhost:9090/api/v1/query?query=fraud_api_requests_total
+3. curl http://localhost:5001
+   → MLflow UI → fraud_detection_improved → 3 runs (XGBoost, LightGBM, RandomForest)
+
+4. curl http://localhost:9090/api/v1/query?query=fraud_api_requests_total
    → Có metrics trả về
 
-7. http://localhost:3002
-   → Grafana dashboard hiển thị metrics
+5. http://localhost:3002
+   → Grafana dashboard hiển thị
 ```
 
 ---
 
-*Làm từng bước. Bước nào xong → user xác nhận → sang bước tiếp.*
+*Cập nhật: 2026-04-05*
