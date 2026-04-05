@@ -372,6 +372,8 @@ async def predict(req: PredictionRequest):
 @app.post("/explain", response_model=ExplainResponse)
 async def explain(req: ExplainRequest):
     """SHAP-based explanation for a prediction (falls back to KNN-based if Booster unavailable)."""
+    REQUEST_COUNT.labels(endpoint="/explain", method="POST").inc()
+    start = time.time()
     try:
         if _serving_knn is None:
             _build_serving_index()
@@ -388,6 +390,8 @@ async def explain(req: ExplainRequest):
         raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        REQUEST_LATENCY.labels(endpoint="/explain").observe(time.time() - start)
 
 
 # ── Transaction Endpoints ──────────────────────────────────────────────────────
@@ -447,10 +451,12 @@ async def list_transactions(
 ):
     """List recent transactions."""
     REQUEST_COUNT.labels(endpoint="/transactions", method="GET").inc()
+    start = time.time()
     txs = db.query(TransactionDB)\
         .order_by(TransactionDB.created_at.desc())\
         .limit(limit)\
         .all()
+    REQUEST_LATENCY.labels(endpoint="/transactions").observe(time.time() - start)
     return txs
 
 
@@ -458,12 +464,14 @@ async def list_transactions(
 async def get_stats(db: Session = Depends(get_db)):
     """Get fraud statistics."""
     REQUEST_COUNT.labels(endpoint="/transactions/stats", method="GET").inc()
+    start = time.time()
     total = db.query(TransactionDB).count()
     fraud = db.query(TransactionDB).filter(TransactionDB.is_fraud == True).count()
     result = db.query(TransactionDB.fraud_probability).all()
     avg_prob = sum(r[0] for r in result) / len(result) if result else 0.0
     fraud_rate_val = (fraud / total * 100) if total > 0 else 0.0
     FRAUD_RATE_GAUGE.set(fraud_rate_val / 100)
+    REQUEST_LATENCY.labels(endpoint="/transactions/stats").observe(time.time() - start)
     return TransactionStats(
         total_transactions=total,
         fraud_count=fraud,
