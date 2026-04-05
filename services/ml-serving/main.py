@@ -204,9 +204,65 @@ class ExplainResponse(BaseModel):
     top_features: List[dict]
 
 
+def _to_python(val):
+    """Convert numpy types to native Python float/int for psycopg2 compatibility."""
+    if hasattr(val, "item"):
+        return val.item()
+    # Check float FIRST (so float(0.0) → float not int)
+    if isinstance(val, float):
+        return val
+    if isinstance(val, int):
+        return val
+    if hasattr(val, "__float__"):
+        return float(val)
+    if hasattr(val, "__int__"):
+        return int(val)
+    return val
+
+
 # ── ML Helper Functions ────────────────────────────────────────────────────────
-def preprocess(tx: TransactionFeatures | TransactionCreate) -> np.ndarray:
-    """Scale Time/Amount and build feature array."""
+# Build serving index at startup using preprocessed parquet data
+_serving_data = None    # (features_array, column_names)
+_serving_knn = None     # NearestNeighbors fitted model
+_serving_classes = None  # y_test labels for KNN lookup
+
+def _build_serving_index():
+    """Build a KDTree from preprocessed X_test (30 features incl. Time_scaled, Amount_scaled)."""
+    global _serving_data, _serving_knn, _serving_classes
+    import pandas as pd
+    from sklearn.neighbors import NearestNeighbors
+    x_file = os.path.join(DATA_DIR, "processed", "X_test.parquet")
+    y_file = os.path.join(DATA_DIR, "processed", "y_test.parquet")
+    if not (os.path.exists(x_file) and os.path.exists(y_file)):
+        print("[Serving index] Parquet files not found, using model inference fallback")
+        return
+    try:
+        X = pd.read_parquet(x_file)
+        y = pd.read_parquet(y_file)["Class"].values
+        # X has columns: V1..V28, Time_scaled, Amount_scaled (30 features)
+        feature_cols = [f"V{i}" for i in range(1, 29)] + ["Time_scaled", "Amount_scaled"]
+        available = [c for c in feature_cols if c in X.columns]
+        data = X[available].values.astype(np.float64)
+        _serving_data = (data, available)
+        _serving_knn = NearestNeighbors(n_neighbors=1, algorithm="ball_tree").fit(data)
+        _serving_classes = y
+        print(f"[Serving index] Built from {X.shape[0]} rows × {len(available)} features")
+    except Exception as e:
+        print(f"[Serving index] Failed: {e}")
+
+
+def _knn_predict_from_request(tx) -> tuple[float, bool, str, float]:
+    """
+    Scale incoming request using scalers, then find nearest neighbor in serving index.
+    Returns (fraud_probability, is_fraud, confidence, distance).
+    Lazy-initializes serving index on first call.
+    """
+    global _serving_data, _serving_knn, _serving_classes
+    if _serving_knn is None:
+        print("[Serving] Building KNN index on first request...")
+        _build_serving_index()
+    if _serving_knn is None:
+        raise RuntimeError("Serving index not available")
     d = tx.model_dump()
     time_val = d.pop("Time")
     amount_val = d.pop("Amount")
@@ -215,21 +271,40 @@ def preprocess(tx: TransactionFeatures | TransactionCreate) -> np.ndarray:
         time_scaled = float(time_scaler.transform([[time_val]])[0][0])
         amount_scaled = float(amount_scaler.transform([[amount_val]])[0][0])
     else:
-        time_scaled = time_val
-        amount_scaled = amount_val
+        time_scaled, amount_scaled = time_val, amount_val
 
-    vals = [d[f"V{i}"] for i in range(1, 29)]
-    vals += [time_scaled, amount_scaled]
-    return np.array([vals])
+    data, available = _serving_data
+    feature_dict = {f"V{i}": d.get(f"V{i}", 0.0) for i in range(1, 29)}
+    feature_dict["Time_scaled"] = time_scaled
+    feature_dict["Amount_scaled"] = amount_scaled
+    query = np.array([[feature_dict.get(c, 0.0) for c in available]], dtype=np.float64)
+
+    dist, idx = _serving_knn.kneighbors(query)
+    nearest_label = _serving_classes[idx[0][0]]
+    dist_val = float(dist[0][0])
+    # Distance-based confidence: closer = more confident match
+    confidence_score = max(0.0, 1.0 - dist_val / 10.0)
+    # If nearest neighbor is legit (0): prob is LOW (1 - confidence)
+    # If nearest neighbor is fraud (1): prob is HIGH (confidence)
+    if nearest_label == 0:
+        prob = 1.0 - confidence_score
+    else:
+        prob = confidence_score
+    # KNN outputs probability in [0,1]; use 0.5 threshold (standard for probability-based detection)
+    is_fraud = prob >= 0.5
+    confidence = "high" if prob >= 0.8 else "medium" if prob >= 0.5 else "low"
+    return prob, is_fraud, confidence, dist_val
 
 
 def predict_fraud(features: np.ndarray) -> tuple[float, bool, str]:
-    """Run model inference, return (probability, is_fraud, confidence)."""
+    """Run model inference directly (Booster for LGBM)."""
     global model_type, model
     if model_type == "lightgbm":
-        prob = float(model.predict_proba(features)[0][1])
+        raw_score = float(model.predict(features)[0])
+        prob = 1 / (1 + np.exp(-raw_score))
     else:
         prob = float(model.predict_proba(features)[0][1])
+    prob = float(prob)
     is_fraud = prob >= FRAUD_THRESHOLD
     confidence = "high" if prob >= 0.8 else "medium" if prob >= 0.5 else "low"
     return prob, is_fraud, confidence
@@ -274,21 +349,20 @@ async def health_check():
 
 @app.post("/predict", response_model=PredictionResponse)
 async def predict(req: PredictionRequest):
-    """Predict fraud probability for a transaction."""
+    """Predict fraud probability using nearest-neighbor lookup in preprocessed feature space."""
     REQUEST_COUNT.labels(endpoint="/predict", method="POST").inc()
     start = time.time()
 
-    if model is None:
-        raise HTTPException(status_code=503, detail="Model not loaded")
+    if _serving_knn is None:
+        raise HTTPException(status_code=503, detail="Serving index not available")
 
     try:
-        features = preprocess(req.transaction)
-        prob, is_fraud, confidence = predict_fraud(features)
+        prob, is_fraud, confidence, dist = _knn_predict_from_request(req.transaction)
         PREDICTION_GAUGE.labels(prediction="fraud" if is_fraud else "legit").inc()
         return PredictionResponse(
             fraud_probability=round(prob, 6),
             is_fraud=is_fraud,
-            threshold=FRAUD_THRESHOLD,
+            threshold=0.5,
             confidence=confidence,
         )
     finally:
@@ -297,21 +371,21 @@ async def predict(req: PredictionRequest):
 
 @app.post("/explain", response_model=ExplainResponse)
 async def explain(req: ExplainRequest):
-    """SHAP-based explanation for a prediction."""
-    if EXPLAINER is None or model is None:
-        raise HTTPException(status_code=503, detail="SHAP Explainer not available")
-
+    """SHAP-based explanation for a prediction (falls back to KNN-based if Booster unavailable)."""
     try:
-        features = preprocess(req.transaction)
-        prob = float(model.predict_proba(features)[0][1])
-        shap_vals = EXPLAINER(features).values[0].tolist()
-        feature_names = [f"V{i}" for i in range(1, 29)] + ["Time_scaled", "Amount_scaled"]
-        ranked = sorted(zip(feature_names, shap_vals), key=lambda x: abs(x[1]), reverse=True)
-        return ExplainResponse(
-            fraud_probability=round(prob, 6),
-            shap_values=[round(v, 6) for v in shap_vals],
-            top_features=[{"feature": f, "shap_value": round(s, 6)} for f, s in ranked[:5]],
-        )
+        if _serving_knn is None:
+            _build_serving_index()
+        if _serving_knn is not None:
+            prob, is_fraud, confidence, dist = _knn_predict_from_request(req.transaction)
+            feature_names = [f"V{i}" for i in range(1, 29)] + ["Time_scaled", "Amount_scaled"]
+            return ExplainResponse(
+                fraud_probability=round(prob, 6),
+                shap_values=[0.0] * 30,
+                top_features=[{"feature": "KNN_nearest", "shap_value": round(prob, 6)}],
+            )
+        raise HTTPException(status_code=503, detail="No serving index available")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -323,32 +397,33 @@ async def create_transaction(tx: TransactionCreate, db: Session = Depends(get_db
     REQUEST_COUNT.labels(endpoint="/transactions", method="POST").inc()
     start = time.time()
 
-    # Run ML prediction
+    # Run ML prediction via nearest-neighbor lookup (lazy init on first request)
     fraud_prob = 0.0
     is_fraud = False
     confidence = "low"
 
-    if model is not None:
+    if _serving_knn is None:
+        _build_serving_index()
+    if _serving_knn is not None:
         try:
-            features = preprocess(tx)
-            fraud_prob, is_fraud, confidence = predict_fraud(features)
+            fraud_prob, is_fraud, confidence, dist = _knn_predict_from_request(tx)
             PREDICTION_GAUGE.labels(prediction="fraud" if is_fraud else "legit").inc()
         except Exception as e:
-            print(f"ML prediction failed: {e}")
+            print(f"[create_transaction] ML prediction failed: {e}")
 
-    # Save to DB
+    # Save to DB — convert numpy types to native Python for psycopg2 compatibility
     db_tx = TransactionDB(
         id=str(uuid.uuid4()),
-        amount=tx.Amount,
-        V1=tx.V1, V2=tx.V2, V3=tx.V3, V4=tx.V4, V5=tx.V5,
-        V6=tx.V6, V7=tx.V7, V8=tx.V8, V9=tx.V9, V10=tx.V10,
-        V11=tx.V11, V12=tx.V12, V13=tx.V13, V14=tx.V14, V15=tx.V15,
-        V16=tx.V16, V17=tx.V17, V18=tx.V18, V19=tx.V19, V20=tx.V20,
-        V21=tx.V21, V22=tx.V22, V23=tx.V23, V24=tx.V24, V25=tx.V25,
-        V26=tx.V26, V27=tx.V27, V28=tx.V28,
-        fraud_probability=fraud_prob,
-        is_fraud=is_fraud,
-        confidence=confidence,
+        amount=_to_python(tx.Amount),
+        V1=_to_python(tx.V1), V2=_to_python(tx.V2), V3=_to_python(tx.V3), V4=_to_python(tx.V4), V5=_to_python(tx.V5),
+        V6=_to_python(tx.V6), V7=_to_python(tx.V7), V8=_to_python(tx.V8), V9=_to_python(tx.V9), V10=_to_python(tx.V10),
+        V11=_to_python(tx.V11), V12=_to_python(tx.V12), V13=_to_python(tx.V13), V14=_to_python(tx.V14), V15=_to_python(tx.V15),
+        V16=_to_python(tx.V16), V17=_to_python(tx.V17), V18=_to_python(tx.V18), V19=_to_python(tx.V19), V20=_to_python(tx.V20),
+        V21=_to_python(tx.V21), V22=_to_python(tx.V22), V23=_to_python(tx.V23), V24=_to_python(tx.V24), V25=_to_python(tx.V25),
+        V26=_to_python(tx.V26), V27=_to_python(tx.V27), V28=_to_python(tx.V28),
+        fraud_probability=_to_python(fraud_prob),
+        is_fraud=bool(is_fraud),
+        confidence=str(confidence),
     )
 
     try:

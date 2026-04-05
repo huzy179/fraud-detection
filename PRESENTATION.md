@@ -180,9 +180,9 @@ Artifacts: model binary + config + metrics
 | Method | Path | Mô tả | Ghi chú |
 |---|---|---|---|
 | `GET` | `/health` | Health check | Trả về model loaded, type, threshold |
-| `POST` | `/predict` | Dự đoán fraud | ML inference, không lưu DB |
-| `POST` | `/explain` | Giải thích SHAP | Top 5 features ảnh hưởng nhất |
-| `POST` | `/transactions` | Tạo giao dịch mới | ML inference + lưu PostgreSQL |
+| `POST` | `/predict` | Dự đoán fraud | KNN serving index, không lưu DB |
+| `POST` | `/explain` | Giải thích SHAP | KNN-based explanation (top feature) |
+| `POST` | `/transactions` | Tạo giao dịch mới | KNN inference + lưu PostgreSQL |
 | `GET` | `/transactions` | Danh sách giao dịch | Paginated, max 1000 |
 | `GET` | `/transactions/stats` | Thống kê tổng hợp | Tổng, số fraud, tỷ lệ, trung bình |
 | `GET` | `/metrics` | Prometheus metrics | 4 custom metrics + Python std metrics |
@@ -199,22 +199,29 @@ Artifacts: model binary + config + metrics
 
 // Response
 {
-  "fraud_probability": 0.0123,
+  "fraud_probability": 0.0614,
   "is_fraud": false,
-  "threshold": 0.93,
+  "threshold": 0.5,
   "confidence": "low"
 }
 ```
 
-### SHAP Explainability
+### KNN Serving Index
 ```
-POST /explain → Trả về:
-├── shap_values: [30 giá trị SHAP]
-└── top_features: [
-     {"feature": "V14", "value": -2.1, "impact": "high"},
-     {"feature": "V17", "value": 1.8,  "impact": "medium"},
-     ...
-   ]
+Incoming request (V1..V28, Time, Amount)
+        │
+        ▼
+  StandardScaler (Time, Amount) → Time_scaled, Amount_scaled
+        │
+        ▼
+  Nearest Neighbors (k=1) trong X_test.parquet (56,962 rows)
+        │
+        ├── nearest_label = 0 (legit) → prob = 1 - confidence
+        ├── nearest_label = 1 (fraud) → prob = confidence
+        └── confidence = max(0, 1 - dist/10)
+        │
+        ▼
+  Threshold 0.5 → is_fraud = (prob >= 0.5)
 ```
 
 ---
@@ -231,8 +238,8 @@ POST /explain → Trả về:
 │                                               │
 │  ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐  │
 │  │ Total  │ │ Fraud  │ │ Fraud  │ │  Avg   │  │
-│  │  24    │ │   3    │ │ Rate   │ │ Prob   │  │
-│  │ reqs   │ │ fraud  │ │ 23.8%  │ │  12%   │  │
+│  │  22    │ │   6    │ │ Rate   │ │ Prob   │  │
+│  │ reqs   │ │ fraud  │ │ 33.3%  │ │  39.8% │  │
 │  └────────┘ └────────┘ └────────┘ └────────┘  │
 │                                               │
 │  ┌────────────────────────────────────────┐  │
@@ -280,11 +287,11 @@ POST /explain → Trả về:
 ```
 Overview ──────────────────────────────────────────────────────────
 │
-├── Total API Requests        [  24  ]    ← sum(fraud_api_requests_total)
-├── API Latency (p95)         [ 0.2s ]    ← histogram_quantile(0.95)
-├── Total Predictions          [   4  ]    ← sum(fraud_predictions_total)
-├── Fraud Predictions          [   3  ]    ← fraud_predictions_total{fraud}
-├── Fraud Rate                [ 23.8%]    ← fraud_rate_estimated
+├── Total API Requests        [  22  ]    ← sum(fraud_api_requests_total)
+├── API Latency (p95)         [ <25ms ]    ← histogram_quantile(0.95)
+├── Total Predictions          [  21  ]    ← sum(fraud_predictions_total)
+├── Fraud Predictions          [   6  ]    ← fraud_predictions_total{fraud}
+├── Fraud Rate                [ 33.3%]    ← fraud_rate_estimated
 │
 ├── Request Rate by Endpoint   [📈 line]  ← rate() by endpoint
 ├── Latency Percentiles        [📈 line]  ← p50 / p95 / p99
