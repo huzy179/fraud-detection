@@ -110,8 +110,12 @@ def get_db():
 
 
 # ── ML Model Loading ───────────────────────────────────────────────────────────
-MODEL_PATH = os.getenv("MODEL_PATH", os.path.join(os.path.dirname(__file__), "models"))
-DATA_DIR = os.getenv("DATA_DIR", os.path.join(os.path.dirname(__file__), "..", "..", "data"))
+MODEL_PATH = os.getenv(
+    "MODEL_PATH", os.path.join(os.path.dirname(__file__), "..", "..", "models")
+)
+DATA_DIR = os.getenv(
+    "DATA_DIR", os.path.join(os.path.dirname(__file__), "..", "..", "data")
+)
 FRAUD_THRESHOLD = float(os.getenv("FRAUD_THRESHOLD", "0.5"))  # tuned threshold
 
 
