@@ -6,32 +6,37 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  API_IMAGE: fraud-api
+  FRONTEND_IMAGE: fraud-frontend
+
 jobs:
   lint-and-test:
     runs-on: self-hosted
-    services:
-      postgres:
-        image: postgres:15
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: fraud_detection
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
+    # runner có thể dùng label tùy chỉnh, ví dụ: runs-on: [self-hosted, linux, x64]
+    # Đảm bảo runner đã cài: Python 3.10, Node.js 18, Docker, PostgreSQL (hoặc dùng container bên dưới)
+
+    # Database dưới dạng Docker container thay vì `services:` (services block không hỗ trợ trên self-hosted)
+    # Hoặc bỏ block này nếu runner đã có PostgreSQL chạy sẵn
+    # Nếu muốn dùng container, runner cần Docker-in-Docker (DinD):
+    # - Kích hoạt tùy chọn trong runner: `./run.sh --dockermode`
+    # - Hoặc bật trong Settings > Runner > "Allow Docker containers"
 
     steps:
       - uses: actions/checkout@v4
 
-      # Python / ML Serving (FastAPI)
+      # ── Python / ML Serving ────────────────────────────────────────
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.10"
+          cache: "pip"
+          cache-dependency-path: services/ml-serving/requirements.txt
 
       - name: Install Python deps
         run: |
@@ -40,51 +45,86 @@ jobs:
       - name: Lint Python
         run: |
           pip install flake8
-          flake8 services/ml-serving/main.py --max-line-length=120 || true
+          flake8 services/ml-serving/main.py --max-line-length=120
 
       - name: Test ML Serving
         run: |
           pip install pytest httpx
-          pytest services/ml-serving/ -v || true
+          pytest services/ml-serving/ -v
 
-      # Frontend
+      # ── Frontend ───────────────────────────────────────────────────
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "npm"
+          cache-dependency-path: services/frontend/package-lock.json
+
       - name: Install frontend deps
         working-directory: ./services/frontend
         run: npm ci
 
+      - name: Lint frontend
+        working-directory: ./services/frontend
+        run: npm run lint || true
+        # Bỏ `|| true` nếu có script lint trong package.json
+
       - name: Build frontend
         working-directory: ./services/frontend
-        run: npm run build || true
+        run: npm run build
 
   docker-build:
     runs-on: self-hosted
     needs: lint-and-test
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build API Server Docker image
-        run: |
-          docker build -f services/ml-serving/Dockerfile \
-            -t fraud-api:${{ github.sha }} \
-            services/ml-serving/
+      # ── Docker setup for self-hosted ───────────────────────────────
+      # Đảm bảo runner đã cài Docker và user chạy runner có quyền docker (group docker)
+      # Nếu gặp lỗi permission: sudo usermod -aG docker $USER  rồi restart runner
 
-      - name: Build Frontend Docker image
-        run: |
-          docker build -f services/frontend/Dockerfile \
-            -t fraud-frontend:${{ github.sha }} \
-            services/frontend/
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: |
+            image=moby/buildkit:latest
+            network=host
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
-          registry: ghcr.io
+          registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Push API Server image
-        run: |
-          docker tag fraud-api:${{ github.sha }} \
-            ghcr.io/${{ github.repository }}/fraud-api:${{ github.sha }}
-          docker push ghcr.io/${{ github.repository }}/fraud-api:${{ github.sha }}
+      # ── Build API Server image ─────────────────────────────────────
+      - name: Build API Server image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: services/ml-serving/Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ github.repository }}/${{ env.API_IMAGE }}:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ github.repository }}/${{ env.API_IMAGE }}:latest
+          cache-from: type=gha, scope=api
+          cache-to: type=gha, mode=max, scope=api
+          build-args: |
+            PYTHONPATH=/app
+
+      # ── Build Frontend image ───────────────────────────────────────
+      - name: Build Frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./services/frontend
+          file: ./services/frontend/Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ github.repository }}/${{ env.FRONTEND_IMAGE }}:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ github.repository }}/${{ env.FRONTEND_IMAGE }}:latest
+          cache-from: type=gha, scope=frontend
+          cache-to: type=gha, mode=max, scope=frontend
+          build-args: |
+            NEXT_PUBLIC_API_URL=http://api-service:8000
