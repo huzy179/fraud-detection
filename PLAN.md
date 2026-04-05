@@ -72,34 +72,43 @@ Grafana (dashboard)
 | Prometheus scrape api | ✅ |
 | Version field xóa khỏi docker-compose | ✅ |
 
-### ⚠️ Cần kiểm tra thêm
+### ✅ Tất cả đã hoàn thành
 
-| Component | Cần check |
+| Component | Trạng thái |
 |---|---|
-| Grafana datasource | Có kết nối Prometheus chưa? (http_code 000 lúc check gần nhất) |
-| Grafana dashboard | Có hiển thị metrics không? |
-| API threshold | Đang dùng 0.93 hay 0.5? |
-| best_config.json threshold | Có được API đọc không? |
+| Dọn dẹp file/folder thừa | ✅ |
+| docker-compose.yml (xóa version, healthcheck, depends_on) | ✅ |
+| train.py (wait_for_mlflow, log_artifact, path fix) | ✅ |
+| ml-pipeline Dockerfile (libgomp1, paths) | ✅ |
+| preprocess.py (path fix) | ✅ |
+| XGBoost + LightGBM + RandomForest trained | ✅ |
+| MLflow runs + artifacts logged | ✅ |
+| best_config.json created | ✅ |
+| README.md cập nhật model performance | ✅ |
+| Old test runs deleted | ✅ |
+| Prometheus scrape api | ✅ |
+| Version field xóa khỏi docker-compose | ✅ |
+| Grafana started + datasource Prometheus connected | ✅ |
+| Grafana dashboard verified (live data) | ✅ |
+| API threshold verified: model_type=lightgbm, threshold=0.93 | ✅ |
+| Prometheus targets verified: up=1 × 2 targets | ✅ |
+| Commit + push to main | ✅ |
+| PRESENTATION.md created | ✅ |
 
 ---
 
-## Các bước tiếp theo (nếu cần)
+### 📋 Tài liệu thuyết trình
 
-### Bước A — Kiểm tra Grafana
-- Check http://localhost:3002 xem dashboard
-- Kiểm tra datasource Prometheus có kết nối không
-
-### Bước B — Kiểm tra API threshold
-- API đọc `FRAUD_THRESHOLD=0.93` từ env
-- Nhưng `main.py` hardcoded fallback 0.5
-- Cần verify API đang dùng threshold nào
-
-### Bước C — Test Prometheus metrics
-- Gửi request lên API → check Prometheus scrape được không
-- Check Grafana dashboard có data không
-
-### Bước D — Commit code
-- Sau khi mọi thứ ổn, commit toàn bộ thay đổi
+Xem file: **`PRESENTATION.md`** — tài liệu đầy đủ gồm:
+- Tổng quan bài toán & giải pháp
+- Kiến trúc hệ thống (architecture diagram)
+- Dữ liệu & tiền xử lý
+- So sánh 3 mô hình + kết quả
+- API endpoints + ví dụ request/response
+- Frontend dashboard
+- Prometheus + Grafana monitoring
+- CI/CD pipeline
+- Hướng dẫn vận hành
 
 ---
 
