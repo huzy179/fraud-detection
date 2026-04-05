@@ -34,7 +34,9 @@ REQUEST_LATENCY = Histogram(
 PREDICTION_GAUGE = Gauge("fraud_predictions_total", "Total predictions", ["prediction"])
 FRAUD_RATE_GAUGE = Gauge("fraud_rate_estimated", "Estimated fraud rate")
 
+
 # ── Database Setup ─────────────────────────────────────────────────────────────
+
 def _get_database_url():
     url = os.getenv("DATABASE_URL", "")
     if url:
@@ -44,7 +46,10 @@ def _get_database_url():
     db_path = pathlib.Path(__file__).parent.parent.parent / "fraud_detection.db"
     return f"sqlite:///{db_path}"
 
+
 DATABASE_URL = _get_database_url()
+
+
 _use_sqlite = DATABASE_URL.startswith("sqlite")
 
 engine = create_engine(
@@ -62,13 +67,34 @@ class TransactionDB(Base):
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     amount = Column(Float, nullable=False)
-    V1 = Column(Float); V2 = Column(Float); V3 = Column(Float); V4 = Column(Float)
-    V5 = Column(Float); V6 = Column(Float); V7 = Column(Float); V8 = Column(Float)
-    V9 = Column(Float); V10 = Column(Float); V11 = Column(Float); V12 = Column(Float)
-    V13 = Column(Float); V14 = Column(Float); V15 = Column(Float); V16 = Column(Float)
-    V17 = Column(Float); V18 = Column(Float); V19 = Column(Float); V20 = Column(Float)
-    V21 = Column(Float); V22 = Column(Float); V23 = Column(Float); V24 = Column(Float)
-    V25 = Column(Float); V26 = Column(Float); V27 = Column(Float); V28 = Column(Float)
+    V1 = Column(Float)
+    V2 = Column(Float)
+    V3 = Column(Float)
+    V4 = Column(Float)
+    V5 = Column(Float)
+    V6 = Column(Float)
+    V7 = Column(Float)
+    V8 = Column(Float)
+    V9 = Column(Float)
+    V10 = Column(Float)
+    V11 = Column(Float)
+    V12 = Column(Float)
+    V13 = Column(Float)
+    V14 = Column(Float)
+    V15 = Column(Float)
+    V16 = Column(Float)
+    V17 = Column(Float)
+    V18 = Column(Float)
+    V19 = Column(Float)
+    V20 = Column(Float)
+    V21 = Column(Float)
+    V22 = Column(Float)
+    V23 = Column(Float)
+    V24 = Column(Float)
+    V25 = Column(Float)
+    V26 = Column(Float)
+    V27 = Column(Float)
+    V28 = Column(Float)
     fraud_probability = Column(Float, default=0.0)
     is_fraud = Column(Boolean, default=False)
     confidence = Column(String(20), default="low")
@@ -143,23 +169,67 @@ except Exception as e:
 
 # ── Pydantic Models ────────────────────────────────────────────────────────────
 class TransactionFeatures(BaseModel):
-    V1: float; V2: float; V3: float; V4: float; V5: float
-    V6: float; V7: float; V8: float; V9: float; V10: float
-    V11: float; V12: float; V13: float; V14: float; V15: float
-    V16: float; V17: float; V18: float; V19: float; V20: float
-    V21: float; V22: float; V23: float; V24: float; V25: float
-    V26: float; V27: float; V28: float
+    V1: float
+    V2: float
+    V3: float
+    V4: float
+    V5: float
+    V6: float
+    V7: float
+    V8: float
+    V9: float
+    V10: float
+    V11: float
+    V12: float
+    V13: float
+    V14: float
+    V15: float
+    V16: float
+    V17: float
+    V18: float
+    V19: float
+    V20: float
+    V21: float
+    V22: float
+    V23: float
+    V24: float
+    V25: float
+    V26: float
+    V27: float
+    V28: float
     Amount: float = Field(..., ge=0)
     Time: float = Field(default=0, ge=0)
 
 
 class TransactionCreate(BaseModel):
-    V1: float; V2: float; V3: float; V4: float; V5: float
-    V6: float; V7: float; V8: float; V9: float; V10: float
-    V11: float; V12: float; V13: float; V14: float; V15: float
-    V16: float; V17: float; V18: float; V19: float; V20: float
-    V21: float; V22: float; V23: float; V24: float; V25: float
-    V26: float; V27: float; V28: float
+    V1: float
+    V2: float
+    V3: float
+    V4: float
+    V5: float
+    V6: float
+    V7: float
+    V8: float
+    V9: float
+    V10: float
+    V11: float
+    V12: float
+    V13: float
+    V14: float
+    V15: float
+    V16: float
+    V17: float
+    V18: float
+    V19: float
+    V20: float
+    V21: float
+    V22: float
+    V23: float
+    V24: float
+    V25: float
+    V26: float
+    V27: float
+    V28: float
     Amount: float = Field(..., ge=0)
     Time: Optional[float] = Field(default=0, ge=0)
 
@@ -226,6 +296,7 @@ _serving_data = None    # (features_array, column_names)
 _serving_knn = None     # NearestNeighbors fitted model
 _serving_classes = None  # y_test labels for KNN lookup
 
+
 def _build_serving_index():
     """Build a KDTree from preprocessed X_test (30 features incl. Time_scaled, Amount_scaled)."""
     global _serving_data, _serving_knn, _serving_classes
@@ -257,7 +328,6 @@ def _knn_predict_from_request(tx) -> tuple[float, bool, str, float]:
     Returns (fraud_probability, is_fraud, confidence, distance).
     Lazy-initializes serving index on first call.
     """
-    global _serving_data, _serving_knn, _serving_classes
     if _serving_knn is None:
         print("[Serving] Building KNN index on first request...")
         _build_serving_index()
@@ -298,7 +368,6 @@ def _knn_predict_from_request(tx) -> tuple[float, bool, str, float]:
 
 def predict_fraud(features: np.ndarray) -> tuple[float, bool, str]:
     """Run model inference directly (Booster for LGBM)."""
-    global model_type, model
     if model_type == "lightgbm":
         raw_score = float(model.predict(features)[0])
         prob = 1 / (1 + np.exp(-raw_score))
@@ -339,6 +408,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 # ── ML Inference Endpoints ──────────────────────────────────────────────────────
 @app.get("/health")
 async def health_check():
@@ -357,7 +427,7 @@ async def predict(req: PredictionRequest):
         raise HTTPException(status_code=503, detail="Serving index not available")
 
     try:
-        prob, is_fraud, confidence, dist = _knn_predict_from_request(req.transaction)
+        prob, is_fraud, confidence, _dist = _knn_predict_from_request(req.transaction)
         PREDICTION_GAUGE.labels(prediction="fraud" if is_fraud else "legit").inc()
         return PredictionResponse(
             fraud_probability=round(prob, 6),
@@ -378,8 +448,7 @@ async def explain(req: ExplainRequest):
         if _serving_knn is None:
             _build_serving_index()
         if _serving_knn is not None:
-            prob, is_fraud, confidence, dist = _knn_predict_from_request(req.transaction)
-            feature_names = [f"V{i}" for i in range(1, 29)] + ["Time_scaled", "Amount_scaled"]
+            prob, _, _, _ = _knn_predict_from_request(req.transaction)
             return ExplainResponse(
                 fraud_probability=round(prob, 6),
                 shap_values=[0.0] * 30,
@@ -419,12 +488,34 @@ async def create_transaction(tx: TransactionCreate, db: Session = Depends(get_db
     db_tx = TransactionDB(
         id=str(uuid.uuid4()),
         amount=_to_python(tx.Amount),
-        V1=_to_python(tx.V1), V2=_to_python(tx.V2), V3=_to_python(tx.V3), V4=_to_python(tx.V4), V5=_to_python(tx.V5),
-        V6=_to_python(tx.V6), V7=_to_python(tx.V7), V8=_to_python(tx.V8), V9=_to_python(tx.V9), V10=_to_python(tx.V10),
-        V11=_to_python(tx.V11), V12=_to_python(tx.V12), V13=_to_python(tx.V13), V14=_to_python(tx.V14), V15=_to_python(tx.V15),
-        V16=_to_python(tx.V16), V17=_to_python(tx.V17), V18=_to_python(tx.V18), V19=_to_python(tx.V19), V20=_to_python(tx.V20),
-        V21=_to_python(tx.V21), V22=_to_python(tx.V22), V23=_to_python(tx.V23), V24=_to_python(tx.V24), V25=_to_python(tx.V25),
-        V26=_to_python(tx.V26), V27=_to_python(tx.V27), V28=_to_python(tx.V28),
+        V1=_to_python(tx.V1),
+        V2=_to_python(tx.V2),
+        V3=_to_python(tx.V3),
+        V4=_to_python(tx.V4),
+        V5=_to_python(tx.V5),
+        V6=_to_python(tx.V6),
+        V7=_to_python(tx.V7),
+        V8=_to_python(tx.V8),
+        V9=_to_python(tx.V9),
+        V10=_to_python(tx.V10),
+        V11=_to_python(tx.V11),
+        V12=_to_python(tx.V12),
+        V13=_to_python(tx.V13),
+        V14=_to_python(tx.V14),
+        V15=_to_python(tx.V15),
+        V16=_to_python(tx.V16),
+        V17=_to_python(tx.V17),
+        V18=_to_python(tx.V18),
+        V19=_to_python(tx.V19),
+        V20=_to_python(tx.V20),
+        V21=_to_python(tx.V21),
+        V22=_to_python(tx.V22),
+        V23=_to_python(tx.V23),
+        V24=_to_python(tx.V24),
+        V25=_to_python(tx.V25),
+        V26=_to_python(tx.V26),
+        V27=_to_python(tx.V27),
+        V28=_to_python(tx.V28),
         fraud_probability=_to_python(fraud_prob),
         is_fraud=bool(is_fraud),
         confidence=str(confidence),
@@ -466,7 +557,7 @@ async def get_stats(db: Session = Depends(get_db)):
     REQUEST_COUNT.labels(endpoint="/transactions/stats", method="GET").inc()
     start = time.time()
     total = db.query(TransactionDB).count()
-    fraud = db.query(TransactionDB).filter(TransactionDB.is_fraud == True).count()
+    fraud = db.query(TransactionDB).filter(TransactionDB.is_fraud.is_(True)).count()
     result = db.query(TransactionDB.fraud_probability).all()
     avg_prob = sum(r[0] for r in result) / len(result) if result else 0.0
     fraud_rate_val = (fraud / total * 100) if total > 0 else 0.0

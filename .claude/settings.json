@@ -56,7 +56,13 @@
       "Bash(docker-compose config:*)",
       "Bash(mkdir -p actions-runner)",
       "Bash(curl -L https://github.com/actions/runner/releases/download/v2.322.0/actions-runner-linux-x64-2.322.0.tar.gz)",
-      "Bash(tar xz:*)"
+      "Bash(tar xz:*)",
+      "Bash(.venv/bin/flake8 services/ml-serving/main.py services/ml-serving/tests/test_main.py --max-line-length=120)",
+      "Bash(python3 -m flake8 services/ml-serving/main.py services/ml-serving/tests/test_main.py --max-line-length=120)",
+      "Bash(pip3 install:*)",
+      "Bash(/Users/maitranhuy/Library/Python/3.9/bin/flake8 services/ml-serving/main.py services/ml-serving/tests/test_main.py --max-line-length=120)",
+      "Bash(/Users/maitranhuy/Library/Python/3.9/bin/flake8 /Users/maitranhuy/fraud-detection/services/ml-serving/main.py --max-line-length=120)",
+      "Bash(/Users/maitranhuy/Library/Python/3.9/bin/flake8 /Users/maitranhuy/fraud-detection/services/ml-serving/tests/test_main.py --max-line-length=120)"
     ],
     "additionalDirectories": [
       "/Users/maitranhuy/fraud-detection/services/ml-serving"

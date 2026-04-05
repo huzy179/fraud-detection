@@ -4,21 +4,20 @@ Run: pytest services/ml-serving/tests/ -v
 Uses TestClient (in-memory, no real DB needed for most tests).
 """
 
-import pytest
 import os
 import sys
-import copy
 import uuid
 
-# Set test DB path BEFORE importing app
-_test_db = f"sqlite:///./test_{uuid.uuid4().hex}.db"
-os.environ["DATABASE_URL"] = _test_db
+import pytest
+
+# Set test DB path before importing app
+os.environ["DATABASE_URL"] = f"sqlite:///./test_{uuid.uuid4().hex}.db"
 os.environ["FRAUD_THRESHOLD"] = "0.5"
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from fastapi.testclient import TestClient
-from main import app
+from fastapi.testclient import TestClient  # noqa: E402
+from main import app  # noqa: E402
 
 client = TestClient(app)
 

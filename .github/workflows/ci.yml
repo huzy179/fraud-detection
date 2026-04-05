@@ -46,9 +46,7 @@ jobs:
       - name: Lint Python
         run: |
           .venv/bin/pip install flake8
-          .venv/bin/flake8 services/ml-serving/ \
-            --max-line-length=120 \
-            --extend-ignore=E302,E402,E501,E702,F401,F824,F841,W503
+          .venv/bin/flake8 services/ml-serving/ --max-line-length=120
 
       - name: Test ML Serving
         run: |
