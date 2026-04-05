@@ -140,6 +140,17 @@ curl -X POST http://localhost:8000/predict \
 | `MLFLOW_TRACKING_URI`  | `http://localhost:5000`                        | MLflow server URL    |
 | `NEXT_PUBLIC_API_URL`  | `http://localhost:8000`                        | FastAPI URL          |
 
+## Model Performance (Trained 2026-04-05)
+
+| Model | Precision | Recall | F1 | ROC-AUC | Threshold |
+|-------|-----------|--------|-----|---------|-----------|
+| **LightGBM** | **0.8617** | **0.8265** | **0.8438** ⭐ | **0.9751** | **0.93** |
+| XGBoost | 0.8526 | 0.8265 | 0.8394 | 0.9792 | 0.94 |
+| RandomForest | 0.9048 | 0.7755 | 0.8352 | 0.9844 | 0.89 |
+
+> **Active model:** LightGBM — threshold=0.93
+> Config: `models/best_config.json`
+
 ## Project Structure
 
 ```
@@ -150,7 +161,11 @@ fraud-detection/
 │   ├── raw/                     # Raw dataset
 │   ├── processed/               # Preprocessed data
 │   └── scripts/download_data.py
-├── notebooks/01_eda.ipynb       # EDA notebook
+├── models/                      # Trained models
+│   ├── xgboost_model.json       # XGBoost (threshold=0.94)
+│   ├── lgbm_model.txt           # LightGBM (threshold=0.93) ← active
+│   ├── rf_model.joblib          # RandomForest (threshold=0.89)
+│   └── best_config.json         # Best model metadata
 ├── services/
 │   ├── ml-pipeline/             # Data processing + training
 │   │   ├── scripts/
@@ -161,11 +176,9 @@ fraud-detection/
 │   │   ├── main.py             # ML inference + DB + REST
 │   │   └── Dockerfile
 │   └── frontend/               # Next.js Dashboard
-│       ├── pages/
 │       └── Dockerfile
 └── monitoring/
     └── prometheus.yml
-```
 
 ## License
 
