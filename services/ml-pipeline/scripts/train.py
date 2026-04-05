@@ -9,6 +9,7 @@ Run: python scripts/train.py
 """
 
 import os
+import time
 import pandas as pd
 import numpy as np
 import xgboost as xgb
@@ -40,27 +41,47 @@ logger = logging.getLogger(__name__)
 MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5001")
 USE_MLFLOW = MLFLOW_TRACKING_URI not in ("", "false", "None") and MLFLOW_AVAILABLE
 
-# Artifact staging: client writes locally before uploading to server.
-# Must be a writable directory on the HOST (where this script runs).
 _artifact_root = os.getenv(
     "MLFLOW_ARTIFACT_ROOT",
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "mlflow_artifacts")
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "mlflow_artifacts")
 )
 os.environ["MLFLOW_ARTIFACT_ROOT"] = _artifact_root
-logger.info(f"MLflow tracking: {MLFLOW_TRACKING_URI}")
-logger.info(f"MLflow artifact root (client): {_artifact_root}")
 
-# Resolve relative to the actual script location, not symlink/copy path.
 _script_dir = os.path.dirname(os.path.abspath(__file__))
-# Detect container environment: /app is writable, data is at /app/data/processed
 if os.path.exists("/app/data/processed"):
     PROCESSED_DIR = "/app/data/processed"
     MODELS_DIR = "/app/models"
 else:
-    # Host: project root is 3 levels up from scripts/
     PROCESSED_DIR = os.path.normpath(os.path.join(_script_dir, "..", "..", "data", "processed"))
     MODELS_DIR = os.path.normpath(os.path.join(_script_dir, "..", "..", "models"))
 os.makedirs(MODELS_DIR, exist_ok=True)
+
+
+def wait_for_mlflow(uri: str, timeout: int = 60, interval: int = 5) -> bool:
+    """
+    Retry connecting to MLflow server. Returns True if connected, False otherwise.
+    """
+    if not USE_MLFLOW:
+        return False
+
+    import urllib.request
+    endpoint = uri.rstrip("/") + "/health"
+    logger.info(f"Waiting for MLflow server at {endpoint} ...")
+
+    for attempt in range(1, timeout // interval + 1):
+        try:
+            urllib.request.urlopen(endpoint, timeout=5)
+            logger.info(f"✅ MLflow server connected ({endpoint})")
+            return True
+        except Exception:
+            pass
+        remaining = (timeout // interval - attempt) * interval
+        logger.info(f"  Attempt {attempt}: MLflow not ready, retrying in {interval}s ... ({remaining}s left)")
+        time.sleep(interval)
+
+    logger.error(f"❌ MLflow server not reachable after {timeout}s at {endpoint}")
+    logger.warning("   Falling back to local-only training (no MLflow tracking)")
+    return False
 
 
 def load_data():
@@ -197,11 +218,23 @@ def _train_with_mlflow(model_cfg, model_name, X_train, y_train, X_test, y_test):
         try:
             with mlflow.start_run(run_name=model_name) as run:
                 mlflow.set_tag("model_type", model_name)
-                result = train_with_cv(model_cfg, model_name, X_train, y_train, X_test, y_test)
-                final_model = result[0]
-                metrics_opt = result[1]
 
-                # Log model params (skip booster-specific keys)
+                # Train first to get the model object
+                _, metrics_opt, optimal_t = train_with_cv(model_cfg, model_name, X_train, y_train, X_test, y_test)
+
+                # Re-train inside MLflow run to get a proper model object
+                if model_name == "XGBoost":
+                    model = xgb.XGBClassifier(**model_cfg, eval_metric="aucpr")
+                    model.fit(X_train, y_train, verbose=False)
+                elif model_name == "LightGBM":
+                    lgb_cfg = {k: v for k, v in model_cfg.items() if k != "verbose"}
+                    model = lgb.LGBMClassifier(**lgb_cfg, verbose=-1)
+                    model.fit(X_train, y_train)
+                else:
+                    model = RandomForestClassifier(**model_cfg)
+                    model.fit(X_train, y_train)
+
+                # Log params (skip booster-specific keys)
                 skip_keys = {"booster", "device"}
                 clean_cfg = {k: v for k, v in model_cfg.items() if k not in skip_keys}
                 mlflow.log_params(clean_cfg)
@@ -209,35 +242,51 @@ def _train_with_mlflow(model_cfg, model_name, X_train, y_train, X_test, y_test):
                 # Log best metrics
                 mlflow.log_metrics(metrics_opt)
 
-                # Log model to artifact store
-                if model_name == "XGBoost":
-                    mlflow.xgboost.log_model(final_model, "xgboost_model",
-                                             registered_model_name="FraudDetector")
-                elif model_name == "LightGBM":
-                    mlflow.lightgbm.log_model(final_model, "lgbm_model",
-                                             registered_model_name="FraudDetector")
-                else:
-                    mlflow.sklearn.log_model(final_model, "rf_model",
-                                             registered_model_name="FraudDetector")
-                return result
+                # Log model artifact using log_artifact (writes directly to run's artifact directory)
+                try:
+                    import joblib as _jlib
+                    _tmp_path = "/tmp/model.joblib"
+                    _jlib.dump(model, _tmp_path)
+                    mlflow.log_artifact(_tmp_path, artifact_path=model_name.lower())
+                    os.remove(_tmp_path)
+                    logger.info(f"  ✅ MLflow: {model_name} artifact saved to run directory")
+                except Exception as art_err:
+                    import traceback as _tb
+                    logger.warning(f"  ⚠️  Artifact logging failed for {model_name}: {art_err}")
+                    logger.warning(f"     Model file saved locally at {MODELS_DIR}")
+
+
+                logger.info(f"  ✅ MLflow: {model_name} run complete")
+                return model, metrics_opt, optimal_t
         except Exception as e:
-            logger.warning(f"MLflow run failed for {model_name}: {e}, falling back to local only.")
+            logger.error(f"  ❌ MLflow logging failed for {model_name}: {e}")
+            logger.warning(f"     Falling back to local training for {model_name}")
     return train_with_cv(model_cfg, model_name, X_train, y_train, X_test, y_test)
 
 
 def main():
     logger.info("=" * 60)
-    logger.info("  Credit Card Fraud Detection — Improved Model Training")
-    logger.info(f"  MLflow: {'ON' if USE_MLFLOW else 'OFF (local only)'}")
+    logger.info("  Credit Card Fraud Detection — Model Training")
     logger.info("=" * 60)
+    logger.info(f"  MLflow tracking URI: {MLFLOW_TRACKING_URI}")
+    logger.info(f"  MLflow available locally: {MLFLOW_AVAILABLE}")
 
     if USE_MLFLOW:
-        try:
-            mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
-            mlflow.set_experiment("fraud_detection_improved")
-        except Exception as e:
-            logger.warning(f"MLflow unavailable: {e}, continuing without tracking.")
+        logger.info(f"  MLflow enabled — attempting to connect ...")
+        mlflow_ready = wait_for_mlflow(MLFLOW_TRACKING_URI, timeout=60, interval=5)
+        if mlflow_ready:
+            try:
+                mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+                mlflow.set_experiment("fraud_detection_improved")
+                logger.info(f"✅ MLflow tracking active — runs will be logged")
+            except Exception as e:
+                logger.warning(f"❌ MLflow connection failed: {e}")
+                globals()["USE_MLFLOW"] = False
+        else:
+            logger.warning("⚠️  MLflow server not reachable — training local only")
             globals()["USE_MLFLOW"] = False
+    else:
+        logger.info("  MLflow disabled (USE_MLFLOW=False) — training local only")
 
     X_train, X_test, y_train, y_test = load_data()
 

@@ -95,7 +95,26 @@ services:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus"
     depends_on:
-      - api
+      api:
+        condition: service_healthy
+
+  # ─── ML Pipeline (train model — runs once then exits) ──────────────────────
+  ml-pipeline:
+    build:
+      context: .
+      dockerfile: services/ml-pipeline/Dockerfile
+    container_name: fraud_ml_pipeline
+    volumes:
+      - ./models:/app/models
+      - ./data:/app/data
+      - ./mlflow_artifacts:/app/mlflow_artifacts
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MLFLOW_ARTIFACT_ROOT: /app/mlflow_artifacts
+    depends_on:
+      mlflow:
+        condition: service_healthy
+    restart: "no"
 
   # ─── Grafana ─────────────────────────────────────────────────────────────
   grafana:

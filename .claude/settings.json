@@ -50,7 +50,10 @@
       "Bash(curl -s -u \"admin:admin\" \"http://localhost:3002/api/datasources\")",
       "Bash(cat monitoring/grafana/provisioning/datasources/*.yaml monitoring/grafana/provisioning/datasources/*.json)",
       "Bash(rm -f fraud_detection.db test_*.db)",
-      "Bash(ls -la *.db)"
+      "Bash(ls -la *.db)",
+      "Bash(docker-compose logs:*)",
+      "Bash(docker-compose ps:*)",
+      "Bash(docker-compose config:*)"
     ],
     "additionalDirectories": [
       "/Users/maitranhuy/fraud-detection/services/ml-serving"
