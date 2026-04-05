@@ -63,7 +63,9 @@
       "Bash(/Users/maitranhuy/Library/Python/3.9/bin/flake8 services/ml-serving/main.py services/ml-serving/tests/test_main.py --max-line-length=120)",
       "Bash(/Users/maitranhuy/Library/Python/3.9/bin/flake8 /Users/maitranhuy/fraud-detection/services/ml-serving/main.py --max-line-length=120)",
       "Bash(/Users/maitranhuy/Library/Python/3.9/bin/flake8 /Users/maitranhuy/fraud-detection/services/ml-serving/tests/test_main.py --max-line-length=120)",
-      "Bash(python3 -m pytest services/ml-serving/tests/test_main.py -v)"
+      "Bash(python3 -m pytest services/ml-serving/tests/test_main.py -v)",
+      "Bash(git -C /Users/maitranhuy/fraud-detection ls-files data/processed/)",
+      "Bash(/Users/maitranhuy/Library/Python/3.9/bin/flake8 /Users/maitranhuy/fraud-detection/services/ml-serving/tests/test_main.py /Users/maitranhuy/fraud-detection/services/ml-serving/main.py --max-line-length=120)"
     ],
     "additionalDirectories": [
       "/Users/maitranhuy/fraud-detection/services/ml-serving"
