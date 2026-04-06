@@ -15,7 +15,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 # ─── Paths ──────────────────────────────────────────────────────────────────
-BASE_DIR = Path(__file__).resolve().parents[2]  # project root
+BASE_DIR = Path(__file__).resolve().parents[3]  # project root
 DATA_DIR = BASE_DIR / "data" / "processed"
 REPORT_DIR = BASE_DIR / "monitoring" / "reports"
 MODEL_DIR = BASE_DIR / "models"

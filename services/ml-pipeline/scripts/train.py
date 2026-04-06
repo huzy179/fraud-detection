@@ -51,6 +51,9 @@ _script_dir = os.path.dirname(os.path.abspath(__file__))
 if os.path.exists("/app/data/processed"):
     PROCESSED_DIR = "/app/data/processed"
     MODELS_DIR = "/app/models"
+elif os.path.exists("/opt/airflow/data/processed"):
+    PROCESSED_DIR = "/opt/airflow/data/processed"
+    MODELS_DIR = "/opt/airflow/models"
 else:
     PROCESSED_DIR = os.path.normpath(os.path.join(_script_dir, "..", "..", "data", "processed"))
     MODELS_DIR = os.path.normpath(os.path.join(_script_dir, "..", "..", "models"))

@@ -16,7 +16,7 @@ import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
+DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data")
 PROCESSED_DIR = os.path.join(DATA_DIR, "processed")
 os.makedirs(PROCESSED_DIR, exist_ok=True)
 
