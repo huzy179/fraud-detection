@@ -74,7 +74,8 @@
       "Bash(npm ci:*)",
       "Bash(.venv/bin/flake8 services/ml-serving/ --max-line-length=120)",
       "Bash(/Users/maitranhuy/fraud-detection/.venv/bin/pip install:*)",
-      "Bash(/Users/maitranhuy/fraud-detection/.venv/bin/flake8 /Users/maitranhuy/fraud-detection/services/ml-serving/ --max-line-length=120)"
+      "Bash(/Users/maitranhuy/fraud-detection/.venv/bin/flake8 /Users/maitranhuy/fraud-detection/services/ml-serving/ --max-line-length=120)",
+      "Bash(docker buildx:*)"
     ],
     "additionalDirectories": [
       "/Users/maitranhuy/fraud-detection/services/ml-serving"
