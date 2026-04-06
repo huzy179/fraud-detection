@@ -36,19 +36,19 @@ with DAG(
     # ─── Step 2: Preprocess data ─────────────────────────────────────────────
     preprocess = BashOperator(
         task_id="preprocess_data",
-        bash_command="cd /opt/airflow/services/ml-pipeline && PYTHONPATH=/opt-airflow/services/ml-pipeline python scripts/preprocess.py",
+        bash_command="cd /opt/airflow/services/ml-pipeline && PYTHONPATH=/opt/airflow/services/ml-pipeline python scripts/preprocess.py",
     )
 
     # ─── Step 3: Train models ─────────────────────────────────────────────────
     train = BashOperator(
         task_id="train_model",
-        bash_command="cd /opt/airflow/services/ml-pipeline && PYTHONPATH=/opt-airflow/services/ml-pipeline python scripts/train.py",
+        bash_command="cd /opt/airflow/services/ml-pipeline && PYTHONPATH=/opt/airflow/services/ml-pipeline python scripts/train.py",
     )
 
     # ─── Step 4: Detect drift (Evidently) ────────────────────────────────────
     detect_drift = BashOperator(
         task_id="detect_drift",
-        bash_command="cd /opt/airflow/services/ml-pipeline && PYTHONPATH=/opt-airflow/services/ml-pipeline python scripts/detect_drift.py",
+        bash_command="cd /opt/airflow/services/ml-pipeline && PYTHONPATH=/opt/airflow/services/ml-pipeline python scripts/detect_drift.py",
         trigger_rule="all_done",
     )
 
