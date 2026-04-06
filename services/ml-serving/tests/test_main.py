@@ -16,10 +16,9 @@ os.environ["DATABASE_URL"] = f"sqlite:///./test_{uuid.uuid4().hex}.db"
 os.environ["FRAUD_THRESHOLD"] = "0.5"
 
 # ── Mock serving index so tests don't need data/processed/*.parquet ─────────────
-mock_data = MagicMock()
-mock_data.__getitem__ = lambda s, k: (
-    [[0.0] * 30] * 5,   # data
-    [f"V{i}" for i in range(1, 29)] + ["Time_scaled", "Amount_scaled"],  # columns
+mock_data = (
+    [[0.0] * 30] * 5,
+    [f"V{i}" for i in range(1, 29)] + ["Time_scaled", "Amount_scaled"],
 )
 mock_knn = MagicMock()
 mock_knn.kneighbors.return_value = ([[0.5]], [[0]])  # distance, nearest_idx
@@ -28,6 +27,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 # Patch serving index BEFORE importing app
 import main as _main_module  # noqa: E402
+_main_module.model = MagicMock()
+_main_module.model_type = "xgboost"
 _main_module._serving_knn = mock_knn
 _main_module._serving_data = mock_data
 _main_module._serving_classes = [0, 0, 0, 1, 0]  # legit majority

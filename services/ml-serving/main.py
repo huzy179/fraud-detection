@@ -12,7 +12,6 @@ from contextlib import asynccontextmanager
 
 import joblib
 import numpy as np
-import xgboost as xgb
 from fastapi import FastAPI, HTTPException, Query, Depends
 from fastapi.responses import PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -136,10 +135,15 @@ def load_model():
 
     # Fallback to XGBoost
     if os.path.exists(xgb_path):
-        model = xgb.XGBClassifier()
-        model.load_model(xgb_path)
-        print(f"XGBoost model loaded from {xgb_path}")
-        return ("xgboost", model)
+        try:
+            import xgboost as xgb
+
+            model = xgb.XGBClassifier()
+            model.load_model(xgb_path)
+            print(f"XGBoost model loaded from {xgb_path}")
+            return ("xgboost", model)
+        except Exception as e:
+            raise RuntimeError(f"XGBoost load failed: {e}") from e
 
     raise RuntimeError(
         f"No model found in {MODEL_PATH}. "
