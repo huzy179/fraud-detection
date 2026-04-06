@@ -46,8 +46,8 @@ services:
   # ─── API Server (FastAPI — ML Inference + Transactions + DB) ──────────────
   api:
     build:
-      context: .
-      dockerfile: services/ml-serving/Dockerfile
+      context: ./services/ml-serving
+      dockerfile: Dockerfile
     container_name: fraud_api
     ports:
       - "8000:8000"
@@ -102,8 +102,8 @@ services:
   # ─── ML Pipeline (train model — runs once then exits) ──────────────────────
   ml-pipeline:
     build:
-      context: .
-      dockerfile: services/ml-pipeline/Dockerfile
+      context: ./services/ml-pipeline
+      dockerfile: Dockerfile
     container_name: fraud_ml_pipeline
     volumes:
       - ./models:/app/models
