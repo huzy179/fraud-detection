@@ -40,18 +40,18 @@ jobs:
 
       - name: Install Python deps
         run: |
-          .venv/bin/pip install --upgrade pip
-          .venv/bin/pip install -r services/ml-serving/requirements.txt
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -r services/ml-serving/requirements.txt
 
       - name: Lint Python
         run: |
-          .venv/bin/pip install flake8
-          .venv/bin/flake8 services/ml-serving/ --max-line-length=120
+          python3 -m pip install flake8
+          python3 -m flake8 services/ml-serving/ --max-line-length=120
 
       - name: Test ML Serving
         run: |
-          .venv/bin/pip install pytest httpx
-          .venv/bin/pytest services/ml-serving/ -v
+          python3 -m pip install pytest httpx
+          python3 -m pytest services/ml-serving/ -v
 
       # ── Frontend ───────────────────────────────────────────────────
       - name: Install & build frontend
@@ -81,8 +81,8 @@ jobs:
       - name: Build API Server image
         uses: docker/build-push-action@v5
         with:
-          context: .
-          file: services/ml-serving/Dockerfile
+          context: ./services/ml-serving
+          file: Dockerfile
           push: true
           tags: |
             ${{ env.REGISTRY }}/${{ github.repository }}/${{ env.API_IMAGE }}:${{ github.sha }}
