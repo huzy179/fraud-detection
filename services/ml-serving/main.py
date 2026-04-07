@@ -30,7 +30,7 @@ REQUEST_COUNT = Counter(
 REQUEST_LATENCY = Histogram(
     "fraud_api_latency_seconds", "API latency in seconds", ["endpoint"]
 )
-PREDICTION_GAUGE = Gauge("fraud_predictions_total", "Total predictions", ["prediction"])
+PREDICTION_COUNT = Counter("fraud_predictions_total", "Total predictions", ["prediction"])
 FRAUD_RATE_GAUGE = Gauge("fraud_rate_estimated", "Estimated fraud rate")
 
 
@@ -327,7 +327,9 @@ def _build_serving_index():
         _serving_classes = y
         print(f"[Serving index] Built from {X.shape[0]} rows × {len(available)} features")
     except Exception as e:
+        import traceback
         print(f"[Serving index] Failed: {e}")
+        traceback.print_exc()
 
 
 def _knn_predict_from_request(tx) -> tuple[float, bool, str, float]:
@@ -432,11 +434,13 @@ async def predict(req: PredictionRequest):
     start = time.time()
 
     if _serving_knn is None:
+        _build_serving_index()
+    if _serving_knn is None:
         raise HTTPException(status_code=503, detail="Serving index not available")
 
     try:
         prob, is_fraud, confidence, _dist = _knn_predict_from_request(req.transaction)
-        PREDICTION_GAUGE.labels(prediction="fraud" if is_fraud else "legit").inc()
+        PREDICTION_COUNT.labels(prediction="fraud" if is_fraud else "legit").inc()
         return PredictionResponse(
             fraud_probability=round(prob, 6),
             is_fraud=is_fraud,
@@ -488,7 +492,7 @@ async def create_transaction(tx: TransactionCreate, db: Session = Depends(get_db
     if _serving_knn is not None:
         try:
             fraud_prob, is_fraud, confidence, dist = _knn_predict_from_request(tx)
-            PREDICTION_GAUGE.labels(prediction="fraud" if is_fraud else "legit").inc()
+            PREDICTION_COUNT.labels(prediction="fraud" if is_fraud else "legit").inc()
         except Exception as e:
             print(f"[create_transaction] ML prediction failed: {e}")
 
