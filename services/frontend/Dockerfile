@@ -2,10 +2,10 @@ FROM node:18-alpine
 
 WORKDIR /app
 
-COPY package*.json ./
+COPY services/frontend/package*.json ./
 RUN npm ci --prefer-offline || npm install
 
-COPY . .
+COPY services/frontend/ .
 
 ENV NODE_ENV=development
 ENV NEXT_PUBLIC_API_URL=http://localhost:8000

@@ -4,10 +4,10 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
+COPY services/ml-serving/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY main.py .
+COPY services/ml-serving/main.py .
 
 ENV PYTHONPATH=/app
 ENV FRAUD_THRESHOLD=0.5

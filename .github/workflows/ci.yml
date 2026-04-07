@@ -81,7 +81,7 @@ jobs:
       - name: Build API Server image
         uses: docker/build-push-action@v5
         with:
-          context: ./services/ml-serving
+          context: .
           file: ./services/ml-serving/Dockerfile
           push: true
           tags: |
@@ -91,7 +91,7 @@ jobs:
       - name: Build Frontend image
         uses: docker/build-push-action@v5
         with:
-          context: ./services/frontend
+          context: .
           file: ./services/frontend/Dockerfile
           push: true
           tags: |
