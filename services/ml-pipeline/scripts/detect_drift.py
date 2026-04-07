@@ -23,7 +23,7 @@ MODEL_DIR = BASE_DIR / "models"
 REPORT_DIR.mkdir(parents=True, exist_ok=True)
 
 # ─── Feature columns (V1–V28 + Amount + Time) ───────────────────────────────
-FEATURE_COLS = [f"V{i}" for i in range(1, 29)] + ["Amount", "Time"]
+FEATURE_COLS = [f"V{i}" for i in range(1, 29)] + ["Amount_scaled", "Time_scaled"]
 
 
 def load_reference_data():

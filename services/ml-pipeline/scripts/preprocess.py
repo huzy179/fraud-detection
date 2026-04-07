@@ -16,11 +16,16 @@ import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data")
+if os.path.exists("/opt/airflow/data/processed"):
+    DATA_DIR = "/opt/airflow/data"
+elif os.path.exists("/app/data/processed"):
+    DATA_DIR = "/app/data"
+else:
+    _script_dir = os.path.dirname(os.path.abspath(__file__))
+    DATA_DIR = os.path.normpath(os.path.join(_script_dir, "..", "..", "data"))
 PROCESSED_DIR = os.path.join(DATA_DIR, "processed")
-os.makedirs(PROCESSED_DIR, exist_ok=True)
-
 RAW_PATH = os.path.join(DATA_DIR, "raw", "creditcard.csv")
+os.makedirs(PROCESSED_DIR, exist_ok=True)
 
 
 def load_data(path: str = RAW_PATH) -> pd.DataFrame:
