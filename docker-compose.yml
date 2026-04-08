@@ -42,6 +42,11 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:5000/', timeout=5)\""]
+      interval: 15s
+      timeout: 10s
+      retries: 5
 
   # ─── API Server (FastAPI — ML Inference + Transactions + DB) ──────────────
   api:
@@ -54,6 +59,7 @@ services:
     volumes:
       - ./models:/app/models
       - ./data:/app/data
+      - ./monitoring/reports:/app/monitoring/reports
     environment:
       FRAUD_THRESHOLD: "0.93"
       MODEL_PATH: /app/models
@@ -172,6 +178,7 @@ services:
       - ./services/ml-pipeline:/opt/airflow/services/ml-pipeline
       - ./data:/opt/airflow/data
       - ./models:/opt/airflow/models
+      - ./monitoring/reports:/opt/airflow/monitoring/reports
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
       interval: 30s
@@ -201,6 +208,7 @@ services:
       - ./services/ml-pipeline:/opt/airflow/services/ml-pipeline
       - ./data:/opt/airflow/data
       - ./models:/opt/airflow/models
+      - ./monitoring/reports:/opt/airflow/monitoring/reports
     restart: unless-stopped
 
 volumes:

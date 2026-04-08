@@ -417,6 +417,139 @@
       ],
       "title": "Requests per Hour by Endpoint",
       "type": "histogram"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 21},
+      "id": 11,
+      "panels": [],
+      "title": "Evidently — Drift Detection",
+      "type": "row"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "mappings": [
+            {"options": {"0": {"color": "green", "index": 0, "text": "NO DRIFT"}}, "type": "value"},
+            {"options": {"1": {"color": "red", "index": 1, "text": "DRIFT DETECTED"}}, "type": "value"}
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 0.5},
+              {"color": "red", "value": 0.7}
+            ]
+          },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 5, "w": 6, "x": 0, "y": 22},
+      "id": 12,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "auto"
+      },
+      "pluginVersion": "10.1.0",
+      "targets": [
+        {
+          "expr": "fraud_drift_score",
+          "legendFormat": "Drift Score",
+          "refId": "A"
+        }
+      ],
+      "title": "Drift Score",
+      "description": "Evidently data drift score: fraction of columns with detected drift (0 = no drift, 1 = full drift). Threshold: 0.5",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "red", "value": 0}
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {"id": "byName", "options": "DRIFT DETECTED"},
+            "properties": [{"id": "thresholds", "value": {"steps": [{"color": "green"}, {"color": "red", "value": 0}]}}]
+          }
+        ]
+      },
+      "gridPos": {"h": 5, "w": 5, "x": 6, "y": 22},
+      "id": 13,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "auto"
+      },
+      "pluginVersion": "10.1.0",
+      "targets": [
+        {
+          "expr": "fraud_drift_score >= 0.5",
+          "legendFormat": "Status",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "title": "Data Drift Status",
+      "description": "1 = drift detected (retrain recommended), 0 = OK",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "custom": {
+            "align": "auto",
+            "displayMode": "auto",
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{"color": "green", "value": null}]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 5, "w": 13, "x": 11, "y": 22},
+      "id": 14,
+      "options": {
+        "content": "<div style=\"text-align:center;\">\n  <h2 style=\"color:#e0e0e0; margin-bottom:8px;\">&#128269; Evidently Drift Report</h2>\n  <p style=\"color:#b0b0b0; margin-bottom:16px;\">Detailed feature-level drift analysis from Evidently</p>\n  <a href=\"/drift-report\" target=\"_blank\" style=\"\n    background-color:#4CAF50;\n    color:white;\n    padding:10px 24px;\n    text-decoration:none;\n    border-radius:4px;\n    font-size:14px;\n    font-weight:bold;\n  \">Open Drift Report</a>\n</div>",
+        "mode": "html"
+      },
+      "pluginVersion": "10.1.0",
+      "targets": [
+        {
+          "expr": "fraud_drift_score",
+          "legendFormat": "Drift Score",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "title": "Evidently Report",
+      "description": "Click 'Open Drift Report' to view the full Evidently HTML drift analysis",
+      "type": "text"
     }
   ],
   "refresh": "10s",

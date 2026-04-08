@@ -45,7 +45,18 @@ with DAG(
         bash_command="cd /opt/airflow/services/ml-pipeline && PYTHONPATH=/opt/airflow/services/ml-pipeline python scripts/train.py",
     )
 
-    # ─── Step 4: Detect drift (Evidently) ────────────────────────────────────
+    # ─── Step 4: Export production transactions ──────────────────────────────────
+    export_transactions = BashOperator(
+        task_id="export_transactions",
+        bash_command=(
+            "cd /opt/airflow/services/ml-pipeline && "
+            "PYTHONPATH=/opt/airflow/services/ml-pipeline "
+            "python scripts/export_transactions.py"
+        ),
+        trigger_rule="all_done",
+    )
+
+    # ─── Step 5: Detect drift (Evidently) ────────────────────────────────────
     detect_drift = BashOperator(
         task_id="detect_drift",
         bash_command="cd /opt/airflow/services/ml-pipeline && PYTHONPATH=/opt/airflow/services/ml-pipeline python scripts/detect_drift.py",
@@ -53,4 +64,4 @@ with DAG(
     )
 
     # ─── Pipeline flow ────────────────────────────────────────────────────────
-    download_data >> preprocess >> train >> detect_drift
+    download_data >> preprocess >> train >> export_transactions >> detect_drift

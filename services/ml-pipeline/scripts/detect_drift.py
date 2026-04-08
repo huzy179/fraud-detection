@@ -4,11 +4,9 @@ Uses Evidently to detect data drift and model performance drift.
 Saves HTML reports to monitoring/reports/
 """
 
-import os
 import sys
 import logging
 import pandas as pd
-import numpy as np
 from pathlib import Path
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -17,8 +15,14 @@ logger = logging.getLogger(__name__)
 # ─── Paths ──────────────────────────────────────────────────────────────────
 BASE_DIR = Path(__file__).resolve().parents[3]  # project root
 DATA_DIR = BASE_DIR / "data" / "processed"
-REPORT_DIR = BASE_DIR / "monitoring" / "reports"
 MODEL_DIR = BASE_DIR / "models"
+
+# Support Airflow Docker volume mount path
+_airflow_reports = Path("/opt/airflow/monitoring/reports")
+if _airflow_reports.exists():
+    REPORT_DIR = _airflow_reports
+else:
+    REPORT_DIR = BASE_DIR / "monitoring" / "reports"
 
 REPORT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -61,8 +65,6 @@ def load_current_data():
 def detect_data_drift(reference_df: pd.DataFrame, current_df: pd.DataFrame, threshold: float = 0.5):
     """Detect data drift using Evidently — Population Stability Index."""
     try:
-        from evidently.dashboard import Dashboard
-        from evidently.tabs import DataDriftTab
         from evidently.report import Report
         from evidently.metric_preset import DataDriftPreset
 
@@ -82,7 +84,12 @@ def detect_data_drift(reference_df: pd.DataFrame, current_df: pd.DataFrame, thre
 
         # Parse drift result
         drift_result = report.as_dict()
-        drift_score = drift_result.get("metrics", [{}])[0].get("value", {}).get("data_drift", {}).get("share_of_drifted_columns", None)
+        drift_score = (
+            drift_result.get("metrics", [{}])[0]
+            .get("value", {})
+            .get("data_drift", {})
+            .get("share_of_drifted_columns", None)
+        )
 
         if drift_score is None:
             # Evidently 0.4+ structure
@@ -93,7 +100,8 @@ def detect_data_drift(reference_df: pd.DataFrame, current_df: pd.DataFrame, thre
 
         if drift_score is not None:
             is_drift = drift_score >= threshold
-            logger.info(f"Data drift detected: {drift_score:.2%} of columns drifted | threshold={threshold} | drift={is_drift}")
+            logger.info(f"Data drift detected: {drift_score:.2%} of columns "
+                        f"drifted | threshold={threshold} | drift={is_drift}")
             return is_drift, drift_score
 
         return None, None
@@ -109,9 +117,9 @@ def detect_target_drift(reference_df: pd.DataFrame, current_df: pd.DataFrame):
         from evidently.report import Report
         from evidently.metric_preset import TargetDriftPreset
 
-        report = Report(metrics=[TargetDriftPreset()])
         # Requires target column — skip if not available in current
         logger.info("Target drift report generated (requires labeled data)")
+        _ = Report(metrics=[TargetDriftPreset()])  # run only, no result stored
         return None
     except Exception as e:
         logger.warning(f"Target drift check skipped: {e}")

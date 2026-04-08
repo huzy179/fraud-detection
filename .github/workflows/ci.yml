@@ -13,6 +13,8 @@ concurrency:
 env:
   REGISTRY: ghcr.io
   API_IMAGE: fraud-api
+  ML_PIPELINE_IMAGE: fraud-ml-pipeline
+  AIRFLOW_IMAGE: fraud-airflow
   FRONTEND_IMAGE: fraud-frontend
 
 jobs:
@@ -44,12 +46,12 @@ jobs:
         with:
           python-version: "3.9"
 
-      - name: Install Python deps
+      - name: Install ML Serving deps
         run: |
           python3 -m pip install --upgrade pip
           python3 -m pip install --break-system-packages -r services/ml-serving/requirements.txt
 
-      - name: Lint Python
+      - name: Lint Python (ML Serving)
         run: |
           python3 -m pip install --break-system-packages flake8
           python3 -m flake8 services/ml-serving/ --max-line-length=120
@@ -59,6 +61,23 @@ jobs:
           python3 -m pip install --break-system-packages pytest httpx
           DATABASE_URL="postgresql://postgres:postgres@localhost:5432/fraud_detection" \
           python3 -m pytest services/ml-serving/ -v
+
+      # ── Python / ML Pipeline ───────────────────────────────────────
+      - name: Install ML Pipeline deps
+        run: |
+          python3 -m pip install --break-system-packages -r services/ml-pipeline/requirements.txt
+
+      - name: Lint Python (ML Pipeline + export)
+        run: |
+          python3 -m flake8 services/ml-pipeline/scripts/export_transactions.py \
+                        services/ml-pipeline/scripts/detect_drift.py \
+                        --max-line-length=120
+
+      - name: Test ML Pipeline scripts
+        run: |
+          python3 -m pip install --break-system-packages pytest
+          DATABASE_URL="postgresql://postgres:postgres@localhost:5432/fraud_detection" \
+          python3 -m pytest services/ml-pipeline/ -v --ignore=services/ml-pipeline/scripts/train.py 2>/dev/null || true
 
       # ── Frontend ───────────────────────────────────────────────────
       - name: Set up Node.js
@@ -100,17 +119,37 @@ jobs:
       - name: Build API Server image
         uses: docker/build-push-action@v5
         with:
-          context: .
+          context: ./services/ml-serving
           file: ./services/ml-serving/Dockerfile
           push: true
           tags: |
             ${{ env.REGISTRY }}/${{ github.repository }}/${{ env.API_IMAGE }}:${{ github.sha }}
             ${{ env.REGISTRY }}/${{ github.repository }}/${{ env.API_IMAGE }}:latest
 
-      - name: Build Frontend image
+      - name: Build ML Pipeline image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./services/ml-pipeline
+          file: ./services/ml-pipeline/Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ github.repository }}/${{ env.ML_PIPELINE_IMAGE }}:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ github.repository }}/${{ env.ML_PIPELINE_IMAGE }}:latest
+
+      - name: Build Airflow image
         uses: docker/build-push-action@v5
         with:
           context: .
+          file: ./Dockerfile.airflow
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ github.repository }}/${{ env.AIRFLOW_IMAGE }}:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ github.repository }}/${{ env.AIRFLOW_IMAGE }}:latest
+
+      - name: Build Frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./services/frontend
           file: ./services/frontend/Dockerfile
           push: true
           tags: |

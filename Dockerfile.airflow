@@ -8,4 +8,4 @@ USER airflow
 
 COPY services/ml-pipeline/requirements.txt /tmp/ml-requirements.txt
 RUN pip install --no-cache-dir -r /tmp/ml-requirements.txt
-RUN pip install --no-cache-dir evidently
+RUN pip install --no-cache-dir "sqlalchemy>=1.4,<2.0" evidently psycopg2-binary

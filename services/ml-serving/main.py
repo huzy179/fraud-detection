@@ -13,8 +13,9 @@ from contextlib import asynccontextmanager
 import joblib
 import numpy as np
 from fastapi import FastAPI, HTTPException, Query, Depends
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
+from pathlib import Path
 from pydantic import BaseModel, Field
 from prometheus_client import Counter, Histogram, Gauge, generate_latest
 import shap
@@ -32,6 +33,7 @@ REQUEST_LATENCY = Histogram(
 )
 PREDICTION_COUNT = Counter("fraud_predictions_total", "Total predictions", ["prediction"])
 FRAUD_RATE_GAUGE = Gauge("fraud_rate_estimated", "Estimated fraud rate")
+DRIFT_SCORE_GAUGE = Gauge("fraud_drift_score", "Latest Evidently data drift score (0=no drift, 1=full drift)")
 
 
 # ── Database Setup ─────────────────────────────────────────────────────────────
@@ -296,6 +298,32 @@ def _to_python(val):
     if hasattr(val, "__int__"):
         return int(val)
     return val
+
+
+def _get_report_dir():
+    """Resolve monitoring/reports directory path across environments."""
+    # Docker volume mount
+    docker_path = Path(__file__).parent / "monitoring" / "reports"
+    if docker_path.exists():
+        return docker_path
+    # Local dev: project root
+    local_path = Path(__file__).parent.parent.parent / "monitoring" / "reports"
+    if local_path.exists():
+        return local_path
+    return None
+
+
+def _load_drift_alert():
+    """Load drift alert JSON if it exists."""
+    report_dir = _get_report_dir()
+    if report_dir is None:
+        return None
+    alert_path = report_dir / "drift_alert.json"
+    if alert_path.exists():
+        import json as _json
+        with open(alert_path) as f:
+            return _json.load(f)
+    return None
 
 
 # ── ML Helper Functions ────────────────────────────────────────────────────────
@@ -583,10 +611,56 @@ async def get_stats(db: Session = Depends(get_db)):
     )
 
 
+# ── Drift / Evidently Endpoints ───────────────────────────────────────────────
+
+@app.get("/drift-status")
+async def drift_status():
+    """JSON status of latest drift detection run."""
+    alert = _load_drift_alert()
+    if alert is None:
+        return {
+            "drift_detected": False,
+            "drift_score": None,
+            "retrain_recommended": False,
+            "message": "No drift check run yet",
+        }
+    return alert
+
+
+@app.get("/drift-alert")
+async def drift_alert():
+    """Raw drift alert JSON file."""
+    report_dir = _get_report_dir()
+    if report_dir is None:
+        raise HTTPException(503, "Reports directory not available")
+    alert_path = report_dir / "drift_alert.json"
+    if not alert_path.exists():
+        return {"drift_detected": False, "message": "No drift alert found"}
+    import json as _json
+    with open(alert_path) as f:
+        return _json.load(f)
+
+
+@app.get("/drift-report")
+async def drift_report():
+    """Serve the Evidently HTML drift report."""
+    report_dir = _get_report_dir()
+    if report_dir is None:
+        raise HTTPException(503, "Reports directory not available")
+    report_path = report_dir / "data_drift_report.html"
+    if not report_path.exists():
+        raise HTTPException(404, "Drift report not available yet. Run detect_drift.py first.")
+    return FileResponse(str(report_path), media_type="text/html")
+
+
 # ── Prometheus Metrics ──────────────────────────────────────────────────────────
 @app.get("/metrics", response_class=PlainTextResponse)
 async def metrics():
-    """Prometheus metrics endpoint."""
+    """Prometheus metrics endpoint — includes drift score gauge."""
+    # Update drift score from latest alert before serving
+    alert = _load_drift_alert()
+    if alert is not None and alert.get("drift_score") is not None:
+        DRIFT_SCORE_GAUGE.set(alert["drift_score"])
     return generate_latest()
 
 
