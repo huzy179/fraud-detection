@@ -1,31 +1,34 @@
 # PLAN — Fraud Detection End-to-End ML Ops
 
-## Cấu trúc hiện tại (sau dọn dẹp)
+## Cấu trúc project
 
 ```
 fraud-detection/
-├── docker-compose.yml
-├── mlflow.db
-├── models/
-│   ├── xgboost_model.json      (1.5MB, threshold=0.94)
-│   ├── lgbm_model.txt          (1.0MB, threshold=0.93) ← ACTIVE
-│   ├── rf_model.joblib          (6.8MB, threshold=0.89)
-│   └── best_config.json         (LightGBM best)
+├── docker-compose.yml              # 8 services: postgres, mlflow, api,
+│                                    #   frontend, prometheus, grafana,
+│                                    #   ml-pipeline, airflow
+├── .github/workflows/ci.yml        # CI/CD pipeline
+├── Dockerfile.airflow               # Airflow custom Docker image
 ├── data/
-│   ├── raw/creditcard.csv      (98MB)
-│   ├── processed/               (parquet + scalers)
+│   ├── raw/creditcard.csv           # Raw dataset (98MB, Kaggle)
+│   ├── processed/                  # Parquet files + scalers
 │   └── scripts/download_data.py
+├── models/
+│   ├── lgbm_model.txt               # Active model (LightGBM, ~1MB)
+│   ├── xgboost_model.json          # XGBoost (~1.5MB)
+│   ├── rf_model.joblib              # RandomForest (~6.8MB)
+│   └── best_config.json             # Best model metadata
 ├── services/
-│   ├── ml-pipeline/            (Dockerfile, preprocess.py, train.py)
-│   ├── ml-serving/             (Dockerfile, main.py, tests/)
-│   └── frontend/               (Dockerfile, pages/, styles/)
+│   ├── ml-pipeline/                 # Preprocess + Train scripts
+│   ├── ml-serving/                  # FastAPI inference + PostgreSQL
+│   └── frontend/                    # Next.js 14 dashboard
+├── airflow/                         # DAGs, logs, plugins, config
+├── mlflow_artifacts/               # MLflow artifact storage
+├── mlflow.db                        # SQLite backend (local dev)
 ├── monitoring/
-│   ├── prometheus.yml
-│   └── grafana/provisioning/
-│       ├── dashboards/fraud-api.json + dashboard.yml
-│       └── datasources/prometheus.yml
-├── mlflow_artifacts/            (MLflow run artifacts)
-└── .claude/settings.json
+│   ├── prometheus.yml               # Scrape config (2 targets)
+│   └── grafana/provisioning/       # Auto-provisioned dashboards
+└── postgres-init/                  # PostgreSQL init scripts
 ```
 
 ---
@@ -33,108 +36,85 @@ fraud-detection/
 ## Luồng ML Ops
 
 ```
-Data (raw CSV)
-    ↓ download_data.py
-Preprocess (StandardScaler, split, SMOTE)
-    ↓ preprocess.py
-Train (XGBoost + LightGBM + RandomForest)
-    ↓ train.py → models/*.json, *.txt, *.joblib
-    ↓ MLflow log runs + artifacts
-MLflow Server (PostgreSQL backend)
-    ↓
-API Server (FastAPI) ← model + scalers + PostgreSQL
-    ↓
-Frontend (Next.js)
-    ↓
-Prometheus (scrape /metrics)
-    ↓
-Grafana (dashboard)
+creditcard.csv (raw, 98MB)
+        │
+        ▼ download_data.py
+StandardScaler + StratifiedSplit + SMOTE
+        │
+        ▼ preprocess.py
+X_train/test.parquet + scalers
+        │
+        ▼ train.py (5-fold CV, 3 models)
+lgbm_model.txt + xgboost_model.json + rf_model.joblib
+        │
+        ├─► MLflow (PostgreSQL backend + artifact root)
+        └─► models/best_config.json
+
+ml-pipeline Dockerfile ──► ml-serving loads models ──► FastAPI
+                                                           │
+                                                  PostgreSQL (transactions)
+                                                           │
+                                                     Prometheus (scrape)
+                                                           │
+                                                     Grafana (dashboard)
+                                                           │
+                                                   GitHub Actions (CI/CD)
 ```
 
 ---
 
-## Tình trạng hiện tại
+## Trạng thái hiện tại
 
-### ✅ Đã xong
+### ✅ Hoàn thành
 
-| Component | Trạng thái |
-|---|---|
-| Dọn dẹp file/folder thừa | ✅ |
-| docker-compose.yml (xóa version, healthcheck, depends_on) | ✅ |
-| train.py (wait_for_mlflow, log_artifact, path fix) | ✅ |
-| ml-pipeline Dockerfile (libgomp1, paths) | ✅ |
-| preprocess.py (path fix) | ✅ |
-| XGBoost + LightGBM + RandomForest trained | ✅ |
-| MLflow runs + artifacts logged | ✅ |
-| best_config.json created | ✅ |
-| README.md cập nhật model performance | ✅ |
-| Old test runs deleted | ✅ |
-| Prometheus scrape api | ✅ |
-| Version field xóa khỏi docker-compose | ✅ |
+- [x] Download dataset + tiền xử lý (StandardScaler, SMOTE)
+- [x] Huấn luyện 3 mô hình (LightGBM ⭐, XGBoost, RandomForest)
+- [x] MLflow tracking (PostgreSQL backend, artifact root)
+- [x] FastAPI inference server với KNN serving + PostgreSQL
+- [x] Next.js frontend dashboard
+- [x] Prometheus metrics scraping (2 targets: api + prometheus self)
+- [x] Grafana dashboard (10 panels, auto-provisioned)
+- [x] Apache Airflow orchestration (webserver + scheduler)
+- [x] Docker Compose multi-service orchestration
+- [x] GitHub Actions CI/CD (lint + test + docker build)
+- [x] README + PRESENTATION documentation
 
-### ✅ Tất cả đã hoàn thành
+### 🚧 Còn cần làm (TODO)
 
-| Component | Trạng thái |
-|---|---|
-| Dọn dẹp file/folder thừa | ✅ |
-| docker-compose.yml (xóa version, healthcheck, depends_on) | ✅ |
-| train.py (wait_for_mlflow, log_artifact, path fix) | ✅ |
-| ml-pipeline Dockerfile (libgomp1, paths) | ✅ |
-| preprocess.py (path fix) | ✅ |
-| XGBoost + LightGBM + RandomForest trained | ✅ |
-| MLflow runs + artifacts logged | ✅ |
-| best_config.json created | ✅ |
-| README.md cập nhật model performance | ✅ |
-| Old test runs deleted | ✅ |
-| Prometheus scrape api | ✅ |
-| Version field xóa khỏi docker-compose | ✅ |
-| Grafana started + datasource Prometheus connected | ✅ |
-| Grafana dashboard verified (live data) | ✅ |
-| API threshold verified: model_type=lightgbm, threshold=0.93 | ✅ |
-| Prometheus targets verified: up=1 × 2 targets | ✅ |
-| Commit + push to main | ✅ |
-| PRESENTATION.md created | ✅ |
-
----
-
-### 📋 Tài liệu thuyết trình
-
-Xem file: **`PRESENTATION.md`** — tài liệu đầy đủ gồm:
-- Tổng quan bài toán & giải pháp
-- Kiến trúc hệ thống (architecture diagram)
-- Dữ liệu & tiền xử lý
-- So sánh 3 mô hình + kết quả
-- API endpoints + ví dụ request/response
-- Frontend dashboard
-- Prometheus + Grafana monitoring
-- CI/CD pipeline
-- Hướng dẫn vận hành
+- [ ] Thiết lập Airflow Fernet key (`AIRFLOW_FERNET_KEY`)
+- [ ] API authentication (hiện tại open)
+- [ ] Model versioning với MLflow Model Registry
+- [ ] Alerting rules cho Prometheus/Grafana
+- [ ] CI: chạy trên Ubuntu thay vì self-hosted
 
 ---
 
 ## Debug checklist
 
-```
-1. docker-compose ps
-   → postgres: healthy ✅
-   → mlflow:    healthy ✅
-   → api:        healthy ✅
-   → prometheus: running ✅
-   → grafana:    running ✅
+```bash
+# 1. Containers status
+docker-compose ps
+# → postgres: healthy
+# → mlflow:    running
+# → api:        healthy
+# → prometheus: running
+# → grafana:    running
 
-2. curl http://localhost:8000/health
-   → {"status": "healthy", "model_loaded": true, ...}
+# 2. API health
+curl http://localhost:8000/health
+# → {"status":"healthy","model_loaded":true,"model_type":"lightgbm"}
 
-3. curl http://localhost:5001
-   → MLflow UI → fraud_detection_improved → 3 runs (XGBoost, LightGBM, RandomForest)
+# 3. MLflow
+open http://localhost:5001
 
-4. curl http://localhost:9090/api/v1/query?query=fraud_api_requests_total
-   → Có metrics trả về
+# 4. Prometheus targets
+curl "http://localhost:9090/api/v1/query?query=up"
+# → up{job="api"} = 1, up{job="prometheus"} = 1
 
-5. http://localhost:3002
-   → Grafana dashboard hiển thị
+# 5. Grafana
+open http://localhost:3002  # admin / admin
 ```
 
 ---
 
-*Cập nhật: 2026-04-05*
+*Cập nhật: 2026-04-08*
