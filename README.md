@@ -2,32 +2,60 @@
 
 Hệ thống phát hiện giao dịch thẻ tín dụng gian lận trong thời gian thực, xây dựng theo mô hình ML Ops end-to-end.
 
+> Dataset: [Kaggle Credit Card Fraud Detection](https://www.kaggle.com/datasets/mlg-ulb/creditcardfraud) — 284,807 giao dịch, ~0.17% fraud rate
+
 ## Kiến trúc
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│                     docker-compose.yml                           │
-│                                                                  │
-│  PostgreSQL ──► MLflow ──► FastAPI ──► Next.js                  │
-│      (5432)        (5001)      (8000)      (3000)                │
-│                            │                                     │
-│                     Prometheus ──► Grafana                      │
-│                       (9090)       (3002)                       │
+│                        Client / Demo                              │
+│                  http://localhost:3000 (Next.js)                  │
+└────────────────────────────┬─────────────────────────────────────┘
+                             │ HTTP POST /predict
+                             ▼
+┌──────────────────────────────────────────────────────────────────┐
+│  API Service (FastAPI)  ── port 8000                             │
+│  • ML Inference (KNN lookup + LightGBM fallback)                 │
+│  • SHAP Explainability                                          │
+│  • Transaction CRUD (PostgreSQL)                                 │
+│  • Prometheus /metrics endpoint                                  │
+└──────┬───────────────┬──────────────────────┬───────────────────┘
+       │               │                      │
+       ▼               ▼                      ▼
+┌─────────────┐  ┌──────────┐       ┌─────────────┐
+│ PostgreSQL  │  │ MLflow   │       │ Prometheus  │
+│ port 5432   │  │ port 5001│       │ port 9090   │
+│ • Txn store│  │ • Metrics│       └──────┬──────┘
+│ • Airflow  │  │ • Model  │              │
+└─────────────┘  └──────────┘              ▼
+                                   ┌─────────────┐
+                                   │  Grafana   │
+                                   │ port 3002  │
+                                   └─────────────┘
+
+┌──────────────────────────────────────────────────────────────────┐
+│  Airflow (port 8080) — DAG: preprocess → train → drift check    │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
+**8 services:** PostgreSQL · MLflow · FastAPI · Next.js · Prometheus · Grafana · Airflow (webserver + scheduler) · ML Pipeline (one-shot)
+
+---
+
 ## Stack công nghệ
 
-| Thành phần    | Công nghệ                                |
-|--------------|------------------------------------------|
-| ML Model     | LightGBM (F1=0.8438, threshold=0.93)     |
-| ML Tracking  | MLflow + PostgreSQL backend              |
-| API Server   | FastAPI + Uvicorn + SQLAlchemy          |
-| Database     | PostgreSQL 15                            |
-| Frontend     | Next.js 14 (TypeScript)                  |
-| Monitoring   | Prometheus + Grafana                    |
-| Orchestration| Docker Compose + GitHub Actions          |
-| Scheduler    | Apache Airflow                           |
+| Thành phần     | Công nghệ                                | Port  |
+|---------------|------------------------------------------|-------|
+| ML Model      | LightGBM / XGBoost / RandomForest         | —     |
+| ML Tracking   | MLflow + PostgreSQL backend              | 5001  |
+| API Server    | FastAPI + Uvicorn + SQLAlchemy           | 8000  |
+| Database      | PostgreSQL 15                             | 5432  |
+| Frontend      | Next.js 14 (TypeScript)                  | 3000  |
+| Metrics       | Prometheus v2.47                         | 9090  |
+| Visualization | Grafana 10.1                             | 3002  |
+| Orchestration | Apache Airflow (LocalExecutor)          | 8080  |
+| CI/CD         | GitHub Actions                           | —     |
+| Container     | Docker Compose                           | —     |
 
 ---
 
@@ -41,49 +69,44 @@ git clone <repo-url>
 cd fraud-detection
 
 # 2. Khởi động toàn bộ hệ thống
-docker-compose up -d
+docker compose up -d
 
 # 3. Kiểm tra trạng thái
-docker-compose ps
+docker compose ps
 ```
 
 > Lần đầu chạy sẽ tự động khởi tạo PostgreSQL, MLflow, API, Frontend, Prometheus, Grafana và Airflow.
 
 **Các service có sẵn:**
 
-| Service          | URL                   | Tài khoản        |
-|-----------------|----------------------|-----------------|
-| Frontend        | http://localhost:3000 | —               |
-| FastAPI Docs    | http://localhost:8000/docs | —         |
-| MLflow UI       | http://localhost:5001 | —               |
-| Prometheus      | http://localhost:9090 | —               |
-| Grafana         | http://localhost:3002 | admin / admin   |
-| Airflow         | http://localhost:8080 | airflow / airflow |
+| Service      | URL                          | Tài khoản         |
+|-------------|------------------------------|-------------------|
+| Frontend    | http://localhost:3000        | —                 |
+| FastAPI     | http://localhost:8000/docs   | —                 |
+| MLflow UI   | http://localhost:5001        | —                 |
+| Prometheus  | http://localhost:9090         | —                 |
+| Grafana     | http://localhost:3002        | admin / admin     |
+| Airflow     | http://localhost:8080        | airflow / airflow |
 
 ### Cách 2: Chạy từng service (Development)
 
 **Yêu cầu:** Python 3.9+, Node.js 18+, PostgreSQL
 
 ```bash
-# ── 1. Download dữ liệu ──────────────────────────────────────
-python data/scripts/download_data.py
-
-# ── 2. Cài đặt ML Pipeline ────────────────────────────────────
+# ── 1. Tiền xử lý dữ liệu ───────────────────────────────────
 cd services/ml-pipeline
 pip install -r requirements.txt
-
-# ── 3. Tiền xử lý dữ liệu ────────────────────────────────────
 python scripts/preprocess.py
 
-# ── 4. Huấn luyện mô hình ────────────────────────────────────
+# ── 2. Huấn luyện mô hình ───────────────────────────────────
 python scripts/train.py
 
-# ── 5. Cài đặt API Server ─────────────────────────────────────
+# ── 3. API Server (terminal 1) ────────────────────────────────
 cd ../ml-serving
 pip install -r requirements.txt
 uvicorn main:app --reload --port 8000
 
-# ── 6. Cài đặt Frontend (terminal khác) ─────────────────────
+# ── 4. Frontend (terminal 2) ─────────────────────────────────
 cd services/frontend
 npm install
 npm run dev
@@ -93,36 +116,27 @@ npm run dev
 
 ```bash
 # Chạy pipeline train (tự động log MLflow + save model)
-docker-compose run --rm ml-pipeline
+docker compose run --rm ml-pipeline
 
 # Restart API để load model mới
-docker-compose restart api
-```
-
-### Huấn luyện lại mô hình (Local)
-
-```bash
-cd services/ml-pipeline
-python scripts/preprocess.py
-python scripts/train.py
-# Restart API
-cd ../ml-serving
-uvicorn main:app --reload --port 8000
+docker compose restart api
 ```
 
 ---
 
 ## API Endpoints
 
-| Method | Path                    | Mô tả                              |
-|--------|-------------------------|------------------------------------|
-| `GET`  | `/health`               | Health check + model info          |
-| `POST` | `/predict`              | Dự đoán fraud (KNN serving)       |
-| `POST` | `/explain`              | Giải thích SHAP-based             |
-| `POST` | `/transactions`         | Tạo giao dịch + dự đoán           |
-| `GET`  | `/transactions`         | Danh sách giao dịch (paginated)    |
-| `GET`  | `/transactions/stats`   | Thống kê fraud                    |
-| `GET`  | `/metrics`              | Prometheus metrics                 |
+| Method | Path                       | Mô tả                            |
+|--------|----------------------------|----------------------------------|
+| `GET`  | `/health`                  | Health check + model info         |
+| `POST` | `/predict`                 | Dự đoán fraud (KNN serving)      |
+| `POST` | `/explain`                 | Giải thích SHAP-based            |
+| `POST` | `/transactions`            | Tạo giao dịch + dự đoán         |
+| `GET`  | `/transactions`            | Danh sách giao dịch (paginated)  |
+| `GET`  | `/transactions/stats`      | Thống kê fraud                  |
+| `GET`  | `/drift-status`            | JSON drift status (Evidently)    |
+| `GET`  | `/drift-report`            | HTML drift report (Evidently)     |
+| `GET`  | `/metrics`                 | Prometheus metrics                |
 
 ### Ví dụ predict
 
@@ -130,14 +144,15 @@ uvicorn main:app --reload --port 8000
 curl -X POST http://localhost:8000/predict \
   -H "Content-Type: application/json" \
   -d '{
-    "V1": -1.359, "V2": -0.072, "V3": 2.536, "V4": 1.378,
-    "V5": -0.338, "V6": 0.462, "V7": 0.239, "V8": 0.098,
-    "V9": -0.664, "V10": 0.463, "V11": -0.931, "V12": -2.304,
-    "V13": 0.772, "V14": -1.576, "V15": -0.230, "V16": -0.050,
-    "V17": -0.844, "V18": -0.380, "V19": 0.597, "V20": -0.697,
-    "V21": -0.055, "V22": -0.270, "V23": -0.233, "V24": 0.140,
-    "V25": -0.052, "V26": 0.265, "V27": 0.825, "V28": -0.068,
-    "Amount": 149.52, "Time": 40680
+    "transaction": {
+      "V1": -0.67, "V2": 1.41, "V3": -1.11, "V4": -1.33, "V5": 1.39,
+      "V6": -1.31, "V7": 1.89, "V8": -0.61, "V9": 0.31, "V10": 0.65,
+      "V11": -0.86, "V12": -0.23, "V13": -0.20, "V14": 0.27, "V15": -0.05,
+      "V16": -0.74, "V17": -0.61, "V18": -0.39, "V19": -0.16, "V20": 0.39,
+      "V21": 0.08, "V22": 0.81, "V23": -0.22, "V24": 0.71, "V25": -0.14,
+      "V26": 0.05, "V27": 0.53, "V28": 0.29,
+      "Amount": 23.00, "Time": 160760.00
+    }
   }'
 ```
 
@@ -145,25 +160,28 @@ curl -X POST http://localhost:8000/predict \
 
 ## Kết quả mô hình
 
-| Model       | Precision | Recall | F1 Score | ROC-AUC | Threshold |
-|-------------|:---------:|:------:|:--------:|:-------:|:---------:|
-| **LightGBM** ⭐ | 0.8617  | 0.8265 | **0.8438** | 0.9751 | 0.93      |
-| XGBoost     | 0.8526   | 0.8265 | 0.8394   | 0.9792 | 0.94      |
-| RandomForest| 0.9048   | 0.7755 | 0.8352   | 0.9844 | 0.89      |
+Sau khi chạy `train.py`, 3 models được so sánh qua 5-fold Stratified CV. Kết quả mẫu (sẽ khác nhau tùy random seed và dataset):
 
-> **Active model:** LightGBM — threshold=0.93
-> Dataset: [Kaggle Credit Card Fraud Detection](https://www.kaggle.com/datasets/mlg-ulb/creditcardfraud) — 284,807 giao dịch, ~0.17% fraud rate
+| Model           | Precision | Recall | F1 Score | ROC-AUC | Threshold |
+|-----------------|:---------:|:------:|:--------:|:-------:|:---------:|
+| **LightGBM** ⭐ | ~0.84     | ~0.84  | **~0.84** | ~0.98  | ~0.53     |
+| XGBoost         | ~0.85     | ~0.84  | ~0.84    | ~0.98  | ~0.53     |
+| RandomForest    | ~0.82     | ~0.81  | ~0.82    | ~0.98  | ~0.60     |
+
+> Model tốt nhất (F1 cao nhất) được lưu tại `models/lgbm_model.txt`
+> Metrics: F1 = 2×(Precision×Recall)/(Precision+Recall) — harmonic mean cân bằng precision/recall
 
 ---
 
 ## Biến môi trường
 
-| Variable              | Default                                         | Mô tả                |
-|----------------------|------------------------------------------------|----------------------|
-| `FRAUD_THRESHOLD`     | `0.93`                                         | Ngưỡng phát hiện fraud |
+| Variable              | Default                                     | Mô tả                  |
+|----------------------|--------------------------------------------|------------------------|
+| `FRAUD_THRESHOLD`     | `0.5` (code), `0.93` (Docker)             | Ngưỡng phát hiện fraud |
+| `MODEL_PATH`          | `/app/models` (Docker)                     | Đường dẫn model files  |
 | `DATABASE_URL`        | `postgresql://postgres:postgres@postgres:5432/` | PostgreSQL connection |
-| `MLFLOW_TRACKING_URI` | `http://mlflow:5000`                           | MLflow server URL    |
-| `NEXT_PUBLIC_API_URL` | `http://localhost:8000`                       | FastAPI URL (frontend) |
+| `MLFLOW_TRACKING_URI` | `http://mlflow:5000`                       | MLflow server URL      |
+| `NEXT_PUBLIC_API_URL` | `http://localhost:8000`                   | FastAPI URL (frontend) |
 
 ---
 
@@ -171,7 +189,7 @@ curl -X POST http://localhost:8000/predict \
 
 ```bash
 # 1. Kiểm tra containers
-docker-compose ps
+docker compose ps
 
 # 2. Health check API
 curl http://localhost:8000/health
@@ -180,8 +198,8 @@ curl http://localhost:8000/health
 curl "http://localhost:9090/api/v1/query?query=up"
 
 # 4. Xem logs
-docker-compose logs -f api
-docker-compose logs -f mlflow
+docker compose logs -f api
+docker compose logs -f mlflow
 ```
 
 ---
@@ -191,30 +209,74 @@ docker-compose logs -f mlflow
 ```
 fraud-detection/
 ├── docker-compose.yml           # Orchestration (8 services)
-├── .github/workflows/ci.yml      # CI/CD pipeline
 ├── Dockerfile.airflow           # Airflow custom image
+├── .github/workflows/ci.yml    # CI/CD pipeline
+│
 ├── data/
-│   ├── raw/creditcard.csv       # Raw dataset (98MB)
-│   ├── processed/               # Parquet + scalers
-│   └── scripts/download_data.py
+│   ├── raw/creditcard.csv     # Raw dataset (98MB)
+│   └── processed/             # Parquet train/test + scalers
+│
 ├── models/
-│   ├── lgbm_model.txt           # Active model (LightGBM)
-│   ├── xgboost_model.json       # XGBoost
-│   ├── rf_model.joblib          # RandomForest
-│   └── best_config.json         # Best config metadata
+│   ├── lgbm_model.txt        # Active model (LightGBM)
+│   ├── xgboost_model.json     # XGBoost
+│   ├── rf_model.joblib        # RandomForest
+│   └── best_config.json       # Best model config (sau khi train)
+│
 ├── services/
-│   ├── ml-pipeline/             # Preprocess + Train
-│   ├── ml-serving/              # FastAPI (inference + DB)
-│   └── frontend/                # Next.js dashboard
-├── airflow/                     # Airflow DAGs
-├── mlflow_artifacts/            # MLflow run artifacts
-├── mlflow.db                    # SQLite MLflow backend (local)
+│   ├── ml-pipeline/
+│   │   ├── scripts/
+│   │   │   ├── preprocess.py       # StandardScaler, SMOTE, stratified split
+│   │   │   ├── train.py            # 5-fold CV, 3 models, threshold tuning
+│   │   │   ├── detect_drift.py     # Evidently drift detection
+│   │   │   └── export_transactions.py
+│   │   ├── requirements.txt
+│   │   └── Dockerfile
+│   │
+│   ├── ml-serving/
+│   │   ├── main.py            # FastAPI: inference + CRUD + metrics
+│   │   ├── requirements.txt
+│   │   └── Dockerfile
+│   │
+│   └── frontend/
+│       ├── pages/index.tsx    # Next.js dashboard
+│       ├── styles/globals.css
+│       ├── package.json
+│       └── Dockerfile
+│
+├── airflow/
+│   ├── dags/fraud_pipeline_dag.py  # DAG: preprocess → train → drift
+│   ├── logs/
+│   └── config/
+│
+├── mlflow_artifacts/           # MLflow file artifact store
+│
 ├── monitoring/
-│   ├── prometheus.yml
-│   └── grafana/provisioning/    # Dashboards + datasources
-└── postgres-init/               # PostgreSQL init scripts
+│   ├── prometheus.yml          # Prometheus scrape config
+│   ├── reports/                # Evidently HTML drift reports
+│   └── grafana/provisioning/   # Auto-provisioned dashboards
+│
+└── postgres-init/              # PostgreSQL init scripts
 ```
 
 ---
 
-MIT — Cập nhật: 2026-04-08
+## Thuyết trình
+
+Tài liệu thuyết trình chi tiết cho từng service nằm trong folder `presentation/`:
+
+```
+presentation/
+├── README.md              # Mục lục + thứ tự trình bày
+├── 01-overview.md         # Kiến trúc tổng quan
+├── 02-ml-pipeline.md      # Batch ML workflow
+├── 03-ml-serving.md       # FastAPI core service
+├── 04-frontend.md         # Next.js dashboard
+├── 05-mlflow.md          # Experiment tracking
+├── 06-airflow.md          # DAG orchestration
+├── 07-monitoring.md       # Prometheus + Grafana
+└── 08-cicd.md           # GitHub Actions
+```
+
+---
+
+MIT — Cập nhật: 2026-04-09
