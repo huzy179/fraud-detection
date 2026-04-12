@@ -320,7 +320,7 @@
           "refId": "C"
         },
         {
-          "expr": "sum(rate(fraud_api_latency_seconds_sum[5m])) by (endpoint) / sum(rate(fraud_api_latency_seconds_count[5m])) by (endpoint)",
+          "expr": "sum(rate(fraud_api_latency_seconds_sum[5m])) by (endpoint) / sum(rate(fraud_api_latency_seconds_count[5m])) by (endpoint) or vector(0)",
           "legendFormat": "mean {{endpoint}}",
           "refId": "D"
         }
