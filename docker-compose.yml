@@ -1,54 +1,139 @@
 name: fraud-detection
 
+x-logging: &logging
+  logging:
+    driver: "json-file"
+    options:
+      max-size: "50m"
+      max-file: "3"
+
+x-healthcheck-base: &healthcheck-base
+  interval: 10s
+  timeout: 5s
+  retries: 5
+
 services:
-  # ─── Database ───────────────────────────────────────────────────────────────
+  # ══════════════════════════════════════════════════════════════════════════════
+  # 1. DATABASE
+  # ══════════════════════════════════════════════════════════════════════════════
   postgres:
     image: postgres:15-alpine
     container_name: fraud_postgres
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: fraud_detection
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./postgres-init:/docker-entrypoint-initdb.d
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      <<: *healthcheck-base
+    networks:
+      - fraud-detection
+    <<: *logging
 
-  # ─── MLflow ────────────────────────────────────────────────────────────────
+  # ══════════════════════════════════════════════════════════════════════════════
+  # 2. OBJECT STORAGE
+  # ══════════════════════════════════════════════════════════════════════════════
+  minio:
+    image: minio/minio:latest
+    container_name: fraud_minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9000/minio/health/live"]
+      <<: *healthcheck-base
+    networks:
+      - fraud-detection
+    <<: *logging
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: fraud_minio_init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["sleep 30 && mc alias set local http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD} && mc mb local/mlflow-artifacts --ignore-existing && mc mb local/drift-reports --ignore-existing && mc anonymous set download local/mlflow-artifacts && mc anonymous set download local/drift-reports && echo MinIO buckets ready"]
+    networks:
+      - fraud-detection
+    restart: "no"
+
+  # ══════════════════════════════════════════════════════════════════════════════
+  # 3. ML PLATFORM
+  # ══════════════════════════════════════════════════════════════════════════════
   mlflow:
     image: ghcr.io/mlflow/mlflow:latest
     container_name: fraud_mlflow
     ports:
       - "5001:5000"
-    volumes:
-      - ./mlflow_artifacts:/app/mlflow_artifacts
-      - ./data:/app/data
-      - ./models:/app/models
+    environment:
+      MLFLOW_TRACKING_URI: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      AWS_S3_ENDPOINT_URL: http://minio:9000
+      AWS_DEFAULT_REGION: ${MINIO_REGION}
     command: >-
       mlflow server
-      --backend-store-uri postgresql://postgres:postgres@postgres:5432/mlflow_db
-      --default-artifact-root /app/mlflow_artifacts
+      --backend-store-uri postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      --default-artifact-root s3://${MINIO_BUCKET_ARTIFACTS}/
       --host 0.0.0.0
       --port 5000
       --allowed-hosts "*"
-    environment:
-      MLFLOW_TRACKING_URI: postgresql://postgres:postgres@postgres:5432/mlflow_db
     depends_on:
       postgres:
         condition: service_healthy
+      minio:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:5000/', timeout=5)\""]
-      interval: 15s
-      timeout: 10s
-      retries: 5
+      <<: *healthcheck-base
+    networks:
+      - fraud-detection
+    <<: *logging
 
-  # ─── API Server (FastAPI — ML Inference + Transactions + DB) ──────────────
+  evidently-service:
+    build:
+      context: ./services/evidently
+      dockerfile: Dockerfile
+    container_name: fraud_evidently_service
+    ports:
+      - "8002:8002"
+    environment:
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET: ${MINIO_BUCKET_REPORTS}
+      MINIO_REGION: ${MINIO_REGION}
+      PROCESSED_DIR: /app/data/processed
+    volumes:
+      - ./data/processed:/app/data/processed:ro
+      - evidently_reports:/app/reports
+    depends_on:
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8002/health', timeout=5)\""]
+      <<: *healthcheck-base
+    networks:
+      - fraud-detection
+    restart: unless-stopped
+    <<: *logging
+
+  # ══════════════════════════════════════════════════════════════════════════════
+  # 4. APPLICATION
+  # ══════════════════════════════════════════════════════════════════════════════
   api:
     build:
       context: ./services/ml-serving
@@ -61,22 +146,31 @@ services:
       - ./data:/app/data
       - ./monitoring/reports:/app/monitoring/reports
     environment:
-      FRAUD_THRESHOLD: "0.93"
+      FRAUD_THRESHOLD: ${FRAUD_THRESHOLD}
       MODEL_PATH: /app/models
       DATA_DIR: /app/data
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/fraud_detection
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       MLFLOW_TRACKING_URI: http://mlflow:5000
-      MLFLOW_ARTIFACT_ROOT: /app/mlflow_artifacts
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET_REPORTS: ${MINIO_BUCKET_REPORTS}
+      EVIDENTLY_SERVICE_URL: ${EVIDENTLY_SERVICE_URL}
     depends_on:
       postgres:
         condition: service_healthy
+      minio:
+        condition: service_healthy
+      evidently-service:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\" || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      <<: *healthcheck-base
+    networks:
+      - fraud-detection
+    restart: unless-stopped
+    <<: *logging
 
-  # ─── Frontend (Next.js) ───────────────────────────────────────────────────
   frontend:
     build:
       context: ./services/frontend
@@ -88,29 +182,13 @@ services:
       NEXT_PUBLIC_API_URL: http://localhost:8000
     depends_on:
       - api
+    networks:
+      - fraud-detection
+    <<: *logging
 
-  # ─── Prometheus ────────────────────────────────────────────────────────────
-  prometheus:
-    image: prom/prometheus:v2.47.0
-    container_name: fraud_prometheus
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
-      - prometheus_data:/prometheus
-    command:
-      - "--config.file=/etc/prometheus/prometheus.yml"
-      - "--storage.tsdb.path=/prometheus"
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090/-/healthy"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    depends_on:
-      api:
-        condition: service_healthy
-
-  # ─── ML Pipeline (train model — runs once then exits) ──────────────────────
+  # ══════════════════════════════════════════════════════════════════════════════
+  # 5. ORCHESTRATION & MONITORING
+  # ══════════════════════════════════════════════════════════════════════════════
   ml-pipeline:
     build:
       context: ./services/ml-pipeline
@@ -119,39 +197,78 @@ services:
     volumes:
       - ./models:/app/models
       - ./data:/app/data
-      - ./mlflow_artifacts:/app/mlflow_artifacts
+      - ./monitoring/reports:/app/monitoring/reports
     environment:
       MLFLOW_TRACKING_URI: http://mlflow:5000
-      MLFLOW_ARTIFACT_ROOT: /app/mlflow_artifacts
+      MLFLOW_ARTIFACT_ROOT: ${MLFLOW_ARTIFACT_ROOT}
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      AWS_S3_ENDPOINT_URL: http://${MINIO_ENDPOINT}
+      MLFLOW_S3_ENDPOINT_URL: http://${MINIO_ENDPOINT}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET_ARTIFACTS: ${MINIO_BUCKET_ARTIFACTS}
+      MINIO_BUCKET_REPORTS: ${MINIO_BUCKET_REPORTS}
     depends_on:
       mlflow:
         condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks:
+      - fraud-detection
     restart: "no"
+    <<: *logging
 
-  # ─── Grafana ─────────────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.47.0
+    container_name: fraud_prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=30d"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090/-/healthy"]
+      <<: *healthcheck-base
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - fraud-detection
+    restart: unless-stopped
+    <<: *logging
+
   grafana:
     image: grafana/grafana:10.1.0
     container_name: fraud_grafana
     ports:
       - "3002:3000"
     environment:
-      GF_SECURITY_ADMIN_PASSWORD: admin
       GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
       GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROOT_URL: http://localhost:3002
+      GF_INSTALL_PLUGINS: grafana-piechart-panel
     volumes:
       - grafana_data:/var/lib/grafana
-      - ./monitoring/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources
-      - ./monitoring/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards
+      - ./monitoring/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./monitoring/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:3000/api/health || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      <<: *healthcheck-base
     depends_on:
       prometheus:
         condition: service_healthy
+    networks:
+      - fraud-detection
+    restart: unless-stopped
+    <<: *logging
 
-  # ─── Airflow ─────────────────────────────────────────────────────────────
   airflow-webserver:
     build:
       context: .
@@ -159,17 +276,26 @@ services:
     container_name: fraud_airflow_webserver
     ports:
       - "8080:8080"
-    command: webserver
+    command: bash -c "bash /opt/airflow/config/init.sh webserver"
     depends_on:
       postgres:
         condition: service_healthy
+      minio:
+        condition: service_healthy
     environment:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://postgres:postgres@postgres:5432/airflow_db
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/airflow_db
       AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
       AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY}
       AIRFLOW__WEBSERVER__BASE_URL: http://localhost:8080
+      AIRFLOW__API__AUTH_BACKENDS: airflow.api.auth.backend.basic_auth
+      AIRFLOW_AUTHENTICATE: "False"
+      AIRFLOW_USERNAME: admin
+      AIRFLOW_PASSWORD: admin
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/logs:/opt/airflow/logs
@@ -181,25 +307,32 @@ services:
       - ./monitoring/reports:/opt/airflow/monitoring/reports
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
+      <<: *healthcheck-base
+    networks:
+      - fraud-detection
     restart: unless-stopped
+    <<: *logging
 
   airflow-scheduler:
     build:
       context: .
       dockerfile: Dockerfile.airflow
     container_name: fraud_airflow_scheduler
-    command: scheduler
+    command: bash -c "bash /opt/airflow/config/init.sh scheduler"
     depends_on:
       postgres:
         condition: service_healthy
+      minio:
+        condition: service_healthy
     environment:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://postgres:postgres@postgres:5432/airflow_db
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/airflow_db
       AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/fraud_detection
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/logs:/opt/airflow/logs
@@ -209,9 +342,25 @@ services:
       - ./data:/opt/airflow/data
       - ./models:/opt/airflow/models
       - ./monitoring/reports:/opt/airflow/monitoring/reports
+    networks:
+      - fraud-detection
     restart: unless-stopped
+    <<: *logging
 
+# ══════════════════════════════════════════════════════════════════════════════
+# VOLUMES
+# ══════════════════════════════════════════════════════════════════════════════
 volumes:
   postgres_data:
+  minio_data:
+  evidently_reports:
   prometheus_data:
   grafana_data:
+
+# ══════════════════════════════════════════════════════════════════════════════
+# NETWORKS
+# ══════════════════════════════════════════════════════════════════════════════
+networks:
+  fraud-detection:
+    name: fraud-detection
+    driver: bridge

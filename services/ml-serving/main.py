@@ -17,8 +17,13 @@ from fastapi.responses import PlainTextResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pathlib import Path
 from pydantic import BaseModel, Field
+import boto3
+import httpx
+from botocore.config import Config as BotoConfig
+from botocore.exceptions import ClientError
 from prometheus_client import Counter, Histogram, Gauge, generate_latest
 import shap
+import json as _json
 
 from sqlalchemy import create_engine, Column, String, Float, Boolean, DateTime
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
@@ -175,6 +180,30 @@ try:
     print(f"Model + scalers loaded. time_scaler={time_scaler is not None}, amount_scaler={amount_scaler is not None}")
 except Exception as e:
     print(f"Warning: Could not load model at startup: {e}")
+
+# ── MinIO / S3 Client ─────────────────────────────────────────────────────────
+MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
+MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
+MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "minioadmin")
+MINIO_BUCKET_REPORTS = os.getenv("MINIO_BUCKET_REPORTS", "drift-reports")
+EVIDENTLY_SERVICE_URL = os.getenv("EVIDENTLY_SERVICE_URL", "http://evidently-service:8002")
+
+_s3_client = None
+
+
+def _get_s3():
+    """Lazy-init S3 client for MinIO."""
+    global _s3_client
+    if _s3_client is None:
+        _s3_client = boto3.client(
+            "s3",
+            endpoint_url=f"http://{MINIO_ENDPOINT}",
+            aws_access_key_id=MINIO_ACCESS_KEY,
+            aws_secret_access_key=MINIO_SECRET_KEY,
+            region_name="us-east-1",
+            config=BotoConfig(signature_version="s3v4"),
+        )
+    return _s3_client
 
 
 # ── Pydantic Models ────────────────────────────────────────────────────────────
@@ -615,7 +644,25 @@ async def get_stats(db: Session = Depends(get_db)):
 
 @app.get("/drift-status")
 async def drift_status():
-    """JSON status of latest drift detection run."""
+    """JSON status of latest drift detection run — tries MinIO first, then local."""
+    cache_dir = Path(__file__).parent / ".drift_cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    local_alert = cache_dir / "drift_alert.json"
+    try:
+        _get_s3().download_file(
+            MINIO_BUCKET_REPORTS,
+            "drift_alert.json",
+            str(local_alert),
+        )
+        with open(local_alert) as f:
+            alert = _json.load(f)
+        if alert.get("drift_score") is not None:
+            DRIFT_SCORE_GAUGE.set(alert["drift_score"])
+        return alert
+    except ClientError:
+        pass
+
+    # Fallback to local file
     alert = _load_drift_alert()
     if alert is None:
         return {
@@ -624,6 +671,8 @@ async def drift_status():
             "retrain_recommended": False,
             "message": "No drift check run yet",
         }
+    if alert.get("drift_score") is not None:
+        DRIFT_SCORE_GAUGE.set(alert["drift_score"])
     return alert
 
 
@@ -643,14 +692,45 @@ async def drift_alert():
 
 @app.get("/drift-report")
 async def drift_report():
-    """Serve the Evidently HTML drift report."""
+    """Serve the Evidently HTML drift report — tries MinIO first, then local."""
+    cache_dir = Path(__file__).parent / ".drift_cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    local_html = cache_dir / "data_drift_report.html"
+
+    # Try MinIO first
+    try:
+        _get_s3().download_file(
+            MINIO_BUCKET_REPORTS,
+            "data_drift_report.html",
+            str(local_html),
+        )
+        return FileResponse(str(local_html), media_type="text/html")
+    except ClientError:
+        pass
+
+    # Fallback to local
     report_dir = _get_report_dir()
     if report_dir is None:
         raise HTTPException(503, "Reports directory not available")
     report_path = report_dir / "data_drift_report.html"
     if not report_path.exists():
-        raise HTTPException(404, "Drift report not available yet. Run detect_drift.py first.")
+        raise HTTPException(404, "Drift report not available yet. Run detect_drift.py or call /run-drift first.")
     return FileResponse(str(report_path), media_type="text/html")
+
+
+@app.post("/run-drift", status_code=202)
+async def run_drift():
+    """Trigger drift detection via the Evidently microservice."""
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            resp = await client.post(f"{EVIDENTLY_SERVICE_URL}/run")
+            resp.raise_for_status()
+            result = resp.json()
+            if result.get("drift_score") is not None:
+                DRIFT_SCORE_GAUGE.set(result["drift_score"])
+            return result
+    except httpx.HTTPError as e:
+        raise HTTPException(502, f"Evidently service error: {e}")
 
 
 # ── Prometheus Metrics ──────────────────────────────────────────────────────────

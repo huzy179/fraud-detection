@@ -23,7 +23,9 @@ REPORT_DIR = BASE_DIR / "monitoring" / "reports"
 
 # ─── Feature columns ─────────────────────────────────────────────────────────
 FEATURE_COLS = [f"V{i}" for i in range(1, 29)] + ["Amount_scaled", "Time_scaled"]
-RAW_COLS = [f"V{i}" for i in range(1, 29)] + ["Amount", "Time"]
+# PostgreSQL stores mixed-case columns (V1-V28, amount). read_sql returns them as-is.
+# Scalers trained on capitalized "Amount" / "Time".
+RAW_COLS_PG = [f"V{i}" for i in range(1, 29)] + ["amount"]
 
 
 def _resolve_path(path, env_var, docker_path, fallback_path):
@@ -88,11 +90,11 @@ def fetch_transactions_from_db(db_url: str) -> pd.DataFrame:
 
         query = """
             SELECT id, amount,
-                   V1, V2, V3, V4, V5, V6, V7, V8, V9, V10,
-                   V11, V12, V13, V14, V15, V16, V17, V18, V19, V20,
-                   V21, V22, V23, V24, V25, V26, V27, V28,
+                   "V1", "V2", "V3", "V4", "V5", "V6", "V7", "V8", "V9", "V10",
+                   "V11", "V12", "V13", "V14", "V15", "V16", "V17", "V18", "V19", "V20",
+                   "V21", "V22", "V23", "V24", "V25", "V26", "V27", "V28",
                    fraud_probability, created_at
-            FROM transactions
+            FROM public.transactions
             ORDER BY created_at DESC
         """
         df = pd.read_sql(query, engine)
@@ -127,33 +129,43 @@ def build_current_parquet(df: pd.DataFrame) -> pd.DataFrame:
         logger.error("No data to process")
         return None
 
-    # Check for required V columns
-    missing = [c for c in RAW_COLS if c not in df.columns]
-    if missing:
-        logger.error(f"Missing required columns: {missing}")
+    # Check for required V columns — match exact names returned by read_sql
+    # PostgreSQL: "V1".."V28" (mixed-case), "amount" (lowercase)
+    raw_v = [f"V{i}" for i in range(1, 29)] + ["amount"]
+    missing_v = [c for c in raw_v if c not in df.columns]
+    if missing_v:
+        logger.error(f"Missing required columns: {missing_v}")
         return None
 
     # Work on a copy of the feature columns
     result = pd.DataFrame()
 
     for i in range(1, 29):
-        col = f"V{i}"
-        if col in df.columns:
-            result[col] = pd.to_numeric(df[col], errors="coerce")
+        # Column names from read_sql match exactly: "V1".."V28"
+        src_col = f"V{i}"
+        if src_col in df.columns:
+            result[src_col] = pd.to_numeric(df[src_col], errors="coerce")
 
     # Scale Amount and Time
     time_scaler, amount_scaler = load_scalers()
 
     if time_scaler is not None and amount_scaler is not None:
-        result["Time_scaled"] = time_scaler.transform(df[["Time"]].values)
-        result["Amount_scaled"] = amount_scaler.transform(df[["Amount"]].values)
+        # DB has "amount" (lowercase); scaler expects capitalized "Amount"
+        amount_col = "amount" if "amount" in df.columns else "Amount"
+        time_col = "time" if "time" in df.columns else None
+        result["Amount_scaled"] = amount_scaler.transform(df[[amount_col]].values)
+        if time_col:
+            result["Time_scaled"] = time_scaler.transform(df[[time_col]].values)
+        else:
+            # Use zeros if time not available (time column absent from DB)
+            result["Time_scaled"] = 0.0
         logger.info("Amount and Time scaled successfully")
     else:
-        # Fallback: no scaler available
-        if "Amount" in df.columns:
-            result["Amount_scaled"] = pd.to_numeric(df["Amount"], errors="coerce")
-        if "Time" in df.columns:
-            result["Time_scaled"] = pd.to_numeric(df["Time"], errors="coerce")
+        # Fallback: no scaler available — use unscaled values
+        amount_col = "amount" if "amount" in df.columns else "Amount"
+        time_col = "time" if "time" in df.columns else None
+        result["Amount_scaled"] = pd.to_numeric(df[amount_col], errors="coerce")
+        result["Time_scaled"] = pd.to_numeric(df[time_col], errors="coerce") if time_col else 0.0
         logger.warning("Using unscaled Amount/Time as fallback")
 
     # Drop rows with NaN in all V columns

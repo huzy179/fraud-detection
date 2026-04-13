@@ -1,11 +1,13 @@
 """
 Airflow DAG — Fraud Detection ML Pipeline
-Orchestrates: preprocess → train → evaluate → (optional) detect drift
+Orchestrates: preprocess → train → evaluate → detect drift (via Evidently microservice)
 """
 
 from airflow import DAG
 from airflow.operators.bash import BashOperator
 from airflow.operators.python import PythonOperator
+from airflow.providers.http.operators.http import SimpleHttpOperator
+from airflow.models.baseoperator import TriggerRule
 from airflow.utils.dates import days_ago
 from datetime import datetime, timedelta
 
@@ -56,11 +58,15 @@ with DAG(
         trigger_rule="all_done",
     )
 
-    # ─── Step 5: Detect drift (Evidently) ────────────────────────────────────
-    detect_drift = BashOperator(
+    # ─── Step 5: Detect drift via Evidently microservice ──────────────────────
+    # First ensure current.parquet exists (export step ran), then call service
+    detect_drift = SimpleHttpOperator(
         task_id="detect_drift",
-        bash_command="cd /opt/airflow/services/ml-pipeline && PYTHONPATH=/opt/airflow/services/ml-pipeline python scripts/detect_drift.py",
-        trigger_rule="all_done",
+        method="POST",
+        http_conn_id="evidently_service",
+        endpoint="/run",
+        response_check=lambda response: response.json().get("drift_score") is not None,
+        trigger_rule=TriggerRule.ALL_DONE,
     )
 
     # ─── Pipeline flow ────────────────────────────────────────────────────────

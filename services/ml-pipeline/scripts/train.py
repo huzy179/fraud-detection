@@ -41,9 +41,16 @@ logger = logging.getLogger(__name__)
 MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5001")
 USE_MLFLOW = MLFLOW_TRACKING_URI not in ("", "false", "None") and MLFLOW_AVAILABLE
 
+# ── MinIO / S3 configuration ───────────────────────────────────────────────────
+MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
+MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
+MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "minioadmin")
+MINIO_BUCKET_ARTIFACTS = os.getenv("MINIO_BUCKET_ARTIFACTS", "mlflow-artifacts")
+
 _artifact_root = os.getenv(
     "MLFLOW_ARTIFACT_ROOT",
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "mlflow_artifacts")
+    f"s3://{MINIO_BUCKET_ARTIFACTS}/" if USE_MLFLOW
+    else os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "mlflow_artifacts")
 )
 os.environ["MLFLOW_ARTIFACT_ROOT"] = _artifact_root
 
@@ -85,6 +92,15 @@ def wait_for_mlflow(uri: str, timeout: int = 60, interval: int = 5) -> bool:
     logger.error(f"❌ MLflow server not reachable after {timeout}s at {endpoint}")
     logger.warning("   Falling back to local-only training (no MLflow tracking)")
     return False
+
+
+def _configure_mlflow_s3():
+    """Set AWS credentials + S3 endpoint so MLflow logs artifacts to MinIO."""
+    import os as _os
+    _os.environ["AWS_ACCESS_KEY_ID"] = MINIO_ACCESS_KEY
+    _os.environ["AWS_SECRET_ACCESS_KEY"] = MINIO_SECRET_KEY
+    _os.environ["AWS_S3_ENDPOINT_URL"] = f"http://{MINIO_ENDPOINT}"
+    logger.info(f"  MLflow S3 configured: endpoint=http://{MINIO_ENDPOINT}, bucket=s3://{MINIO_BUCKET_ARTIFACTS}/")
 
 
 def load_data():
@@ -245,17 +261,18 @@ def _train_with_mlflow(model_cfg, model_name, X_train, y_train, X_test, y_test):
                 # Log best metrics
                 mlflow.log_metrics(metrics_opt)
 
-                # Log model artifact using log_artifact (writes directly to run's artifact directory)
+                # Log model artifact to S3 via MLflow model flavor loggers
                 try:
-                    import joblib as _jlib
-                    _tmp_path = "/tmp/model.joblib"
-                    _jlib.dump(model, _tmp_path)
-                    mlflow.log_artifact(_tmp_path, artifact_path=model_name.lower())
-                    os.remove(_tmp_path)
-                    logger.info(f"  ✅ MLflow: {model_name} artifact saved to run directory")
+                    if model_name == "XGBoost":
+                        mlflow.xgboost.log_model(model, artifact_path=model_name.lower())
+                    elif model_name == "LightGBM":
+                        mlflow.lightgbm.log_model(model, artifact_path=model_name.lower())
+                    else:
+                        mlflow.sklearn.log_model(model, artifact_path=model_name.lower())
+                    logger.info(f"  ✅ MLflow: {model_name} model logged to S3 s3://{MINIO_BUCKET_ARTIFACTS}/")
                 except Exception as art_err:
                     import traceback as _tb
-                    logger.warning(f"  ⚠️  Artifact logging failed for {model_name}: {art_err}")
+                    logger.warning(f"  ⚠️  log_model failed for {model_name}: {art_err}")
                     logger.warning(f"     Model file saved locally at {MODELS_DIR}")
 
 
@@ -280,8 +297,9 @@ def main():
         if mlflow_ready:
             try:
                 mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+                _configure_mlflow_s3()
                 mlflow.set_experiment("fraud_detection_improved")
-                logger.info(f"✅ MLflow tracking active — runs will be logged")
+                logger.info(f"✅ MLflow tracking active — artifacts → s3://{MINIO_BUCKET_ARTIFACTS}/")
             except Exception as e:
                 logger.warning(f"❌ MLflow connection failed: {e}")
                 globals()["USE_MLFLOW"] = False

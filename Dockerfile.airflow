@@ -7,5 +7,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 USER airflow
 
 COPY services/ml-pipeline/requirements.txt /tmp/ml-requirements.txt
-RUN pip install --no-cache-dir -r /tmp/ml-requirements.txt
-RUN pip install --no-cache-dir "sqlalchemy>=1.4,<2.0" evidently psycopg2-binary
+RUN pip install --no-cache-dir --timeout 300 -r /tmp/ml-requirements.txt || \
+    pip install --no-cache-dir --timeout 300 -r /tmp/ml-requirements.txt || \
+    pip install --no-cache-dir --timeout 300 -r /tmp/ml-requirements.txt
+
+RUN pip install --no-cache-dir --timeout 300 \
+    "sqlalchemy>=1.4,<2.0" evidently psycopg2-binary httpx minio boto3 \
+    "apache-airflow-providers-http>=2.0.0" \
+    "protobuf>=3.20,<4.0" || \
+    pip install --no-cache-dir --timeout 300 \
+    "sqlalchemy>=1.4,<2.0" evidently psycopg2-binary httpx minio boto3 \
+    "apache-airflow-providers-http>=2.0.0" \
+    "protobuf>=3.20,<4.0"

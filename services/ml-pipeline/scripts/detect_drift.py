@@ -1,10 +1,12 @@
 """
 Drift Detection — Fraud Detection System
 Uses Evidently to detect data drift and model performance drift.
-Saves HTML reports to monitoring/reports/
+Saves HTML reports to monitoring/reports/ + uploads to MinIO (drift-reports bucket).
 """
 
 import sys
+import os
+import json
 import logging
 import pandas as pd
 from pathlib import Path
@@ -29,6 +31,33 @@ REPORT_DIR.mkdir(parents=True, exist_ok=True)
 # ─── Feature columns (V1–V28 + Amount + Time) ───────────────────────────────
 FEATURE_COLS = [f"V{i}" for i in range(1, 29)] + ["Amount_scaled", "Time_scaled"]
 
+# ─── MinIO / S3 ────────────────────────────────────────────────────────────────
+MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
+MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
+MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "minioadmin")
+MINIO_BUCKET_REPORTS = os.getenv("MINIO_BUCKET_REPORTS", "drift-reports")
+
+
+def _upload_to_minio(local_path: Path, s3_key: str):
+    """Upload a report file to MinIO drift-reports bucket."""
+    try:
+        import boto3
+        from botocore.config import Config as BotoConfig
+        from botocore.exceptions import ClientError
+
+        s3 = boto3.client(
+            "s3",
+            endpoint_url=f"http://{MINIO_ENDPOINT}",
+            aws_access_key_id=MINIO_ACCESS_KEY,
+            aws_secret_access_key=MINIO_SECRET_KEY,
+            region_name="us-east-1",
+            config=BotoConfig(signature_version="s3v4"),
+        )
+        s3.upload_file(str(local_path), MINIO_BUCKET_REPORTS, s3_key)
+        logger.info(f"  ✅ Uploaded to MinIO: s3://{MINIO_BUCKET_REPORTS}/{s3_key}")
+    except Exception as e:
+        logger.warning(f"  ⚠️  MinIO upload failed for {s3_key}: {e}")
+
 
 def load_reference_data():
     """Load the original training data as reference."""
@@ -44,18 +73,23 @@ def load_reference_data():
 def load_current_data():
     """
     Load current/production data for drift comparison.
-    In production this would come from the database.
-    For now, uses a snapshot if available.
+    Validates that current.parquet has enough V-columns before using it.
+    Falls back to X_test.parquet if snapshot is empty or invalid.
     """
-    # Try loading a production snapshot if it exists
     snapshot_path = DATA_DIR / "current.parquet"
     if snapshot_path.exists():
-        return pd.read_parquet(snapshot_path)
+        df = pd.read_parquet(snapshot_path)
+        v_cols = [f"V{i}" for i in range(1, 29)]
+        valid_cols = [c for c in v_cols + ["Amount_scaled", "Time_scaled"] if c in df.columns]
+        if len(df) >= 10 and len(valid_cols) >= 20:
+            logger.info(f"Current snapshot loaded: {df.shape[0]} rows, {len(valid_cols)} features")
+            return df[valid_cols]
+        logger.warning(f"current.parquet too small ({len(df)} rows) — using X_test as proxy")
 
-    # Fallback: use test data as a stand-in for demonstration
+    # Fallback: use test data
     try:
         X_test = pd.read_parquet(DATA_DIR / "X_test.parquet")
-        logger.info("Using X_test as current data proxy (no production snapshot found)")
+        logger.info("Using X_test as current data proxy")
         return X_test[FEATURE_COLS]
     except Exception as e:
         logger.warning(f"Could not load current data: {e}")
@@ -65,8 +99,8 @@ def load_current_data():
 def detect_data_drift(reference_df: pd.DataFrame, current_df: pd.DataFrame, threshold: float = 0.5):
     """Detect data drift using Evidently — Population Stability Index."""
     try:
-        from evidently.report import Report
-        from evidently.metric_preset import DataDriftPreset
+        from evidently.legacy.report import Report
+        from evidently.legacy.metric_preset import DataDriftPreset
 
         report = Report(metrics=[
             DataDriftPreset(),
@@ -81,6 +115,7 @@ def detect_data_drift(reference_df: pd.DataFrame, current_df: pd.DataFrame, thre
         report_path = REPORT_DIR / "data_drift_report.html"
         report.save_html(str(report_path))
         logger.info(f"Data drift report saved: {report_path}")
+        _upload_to_minio(report_path, report_path.name)
 
         # Parse drift result
         drift_result = report.as_dict()
@@ -114,8 +149,8 @@ def detect_data_drift(reference_df: pd.DataFrame, current_df: pd.DataFrame, thre
 def detect_target_drift(reference_df: pd.DataFrame, current_df: pd.DataFrame):
     """Detect fraud rate drift (target distribution shift)."""
     try:
-        from evidently.report import Report
-        from evidently.metric_preset import TargetDriftPreset
+        from evidently.legacy.report import Report
+        from evidently.legacy.metric_preset import TargetDriftPreset
 
         # Requires target column — skip if not available in current
         logger.info("Target drift report generated (requires labeled data)")
@@ -132,8 +167,8 @@ def detect_prediction_drift():
     Compares prediction distribution against training baseline.
     """
     try:
-        from evidently.report import Report
-        from evidently.metric_preset import DataDriftPreset
+        from evidently.legacy.report import Report
+        from evidently.legacy.metric_preset import DataDriftPreset
 
         # Load stored predictions baseline if available
         baseline_path = MODEL_DIR / "prediction_baseline.csv"
@@ -155,6 +190,7 @@ def detect_prediction_drift():
         report_path = REPORT_DIR / "prediction_drift_report.html"
         report.save_html(str(report_path))
         logger.info(f"Prediction drift report saved: {report_path}")
+        _upload_to_minio(report_path, report_path.name)
         return True
 
     except Exception as e:
@@ -202,17 +238,26 @@ def main():
         logger.warning("DRIFT_ALERT: Conditions met for model retraining")
         # Write a flag file Airflow can pick up
         flag_path = REPORT_DIR / "drift_alert.json"
-        import json
         with open(flag_path, "w") as f:
             json.dump({
                 "drift_detected": True,
                 "drift_score": float(drift_score) if drift_score else None,
                 "retrain_recommended": True,
             }, f, indent=2)
-        logger.info(f"Drift alert written to {flag_path}")
+        _upload_to_minio(flag_path, "drift_alert.json")
+        logger.info(f"Drift alert written to {flag_path} + uploaded to MinIO")
         # Exit with code 0 so Airflow task succeeds (alert is recorded)
     else:
         logger.info("Drift check complete — retraining not required")
+        # Still write a "no drift" alert
+        flag_path = REPORT_DIR / "drift_alert.json"
+        with open(flag_path, "w") as f:
+            json.dump({
+                "drift_detected": False,
+                "drift_score": float(drift_score) if drift_score else None,
+                "retrain_recommended": False,
+            }, f, indent=2)
+        _upload_to_minio(flag_path, "drift_alert.json")
 
     logger.info("=== Drift Detection Complete ===")
 
