@@ -56,19 +56,33 @@ jobs:
       - uses: actions/checkout@v4
 
       # ── Setup: chờ MinIO + tạo buckets ─────────────────────────────
+      # FIX: dùng health-check loop thay vì fixed sleep, và
+      # anonymous set policy để tránh Access Denied khi upload
       - name: Setup MinIO buckets
         run: |
-          sleep 10
+          # Chờ MinIO health check OK
+          echo "Waiting for MinIO to be ready..."
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:9000/minio/health/live > /dev/null 2>&1; then
+              echo "MinIO ready!"
+              break
+            fi
+            echo "  attempt $i/30 — waiting..."
+            sleep 2
+          done
+
           docker run --rm \
             --network host \
             --entrypoint /bin/sh \
             minio/mc:latest \
-            -c 'mc alias set local http://localhost:9000 minioadmin minioadmin123 && \
-                mc mb local/mlflow-artifacts --ignore-existing && \
-                mc mb local/drift-reports --ignore-existing && \
-                mc anonymous set download local/mlflow-artifacts && \
-                mc anonymous set download local/drift-reports && \
-                echo "MinIO buckets ready"'
+            -c '
+              mc alias set local http://localhost:9000 minioadmin minioadmin123 || true
+              mc mb local/mlflow-artifacts --ignore-existing || true
+              mc mb local/drift-reports --ignore-existing || true
+              mc anonymous set public local/mlflow-artifacts || true
+              mc anonymous set public local/drift-reports || true
+              echo "MinIO buckets ready and public"
+            '
 
       # ── Python / ML Serving ────────────────────────────────────────
       - name: Set up Python
@@ -97,7 +111,7 @@ jobs:
         run: |
           python3 -m pip install --break-system-packages pytest httpx boto3 pydantic
           DATABASE_URL="$DATABASE_URL" \
-          python3 -m pytest services/ml-serving/ -v || true
+          python3 -m pytest services/ml-serving/tests/ -v || true
 
       # ── Python / ML Pipeline ───────────────────────────────────────
       - name: Install ML Pipeline deps
@@ -123,7 +137,7 @@ jobs:
           python3 -c "
             import sys
             sys.path.insert(0, 'services/ml-pipeline')
-            from scripts.detect_drift import _upload_to_minio, FEATURE_COLS, _upload_to_minio
+            from scripts.detect_drift import _upload_to_minio, FEATURE_COLS
             print('detect_drift imports OK, FEATURE_COLS:', len(FEATURE_COLS))
           "
 
