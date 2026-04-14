@@ -129,10 +129,10 @@ jobs:
           MINIO_BUCKET_REPORTS: drift-reports
         run: |
           python3 -c "
-            import sys
-            sys.path.insert(0, 'services/ml-pipeline')
-            from scripts.detect_drift import _upload_to_minio, FEATURE_COLS
-            print('detect_drift imports OK, FEATURE_COLS:', len(FEATURE_COLS))
+          import sys
+          sys.path.insert(0, 'services/ml-pipeline')
+          from scripts.detect_drift import _upload_to_minio, FEATURE_COLS
+          print('detect_drift imports OK, FEATURE_COLS:', len(FEATURE_COLS))
           "
 
       # ── Python / Evidently Service ──────────────────────────────────
