@@ -46,29 +46,22 @@ jobs:
         ports:
           - 9000:9000
           - 9001:9001
-        options: >-
-          --health-cmd "curl -f http://localhost:9000/minio/health/live"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
 
     steps:
       - uses: actions/checkout@v4
 
       # ── Setup: chờ MinIO + tạo buckets ─────────────────────────────
-      # FIX: dùng health-check loop thay vì fixed sleep, và
-      # anonymous set policy để tránh Access Denied khi upload
       - name: Setup MinIO buckets
         run: |
-          # Chờ MinIO health check OK
-          echo "Waiting for MinIO to be ready..."
+          set -x
+          # Chờ MinIO sẵn sàng (ping loop)
           for i in $(seq 1 30); do
             if curl -sf http://localhost:9000/minio/health/live > /dev/null 2>&1; then
-              echo "MinIO ready!"
+              echo "MinIO ready (attempt $i)"
               break
             fi
-            echo "  attempt $i/30 — waiting..."
-            sleep 2
+            echo "Waiting for MinIO... attempt $i/30"
+            sleep 3
           done
 
           docker run --rm \
@@ -81,7 +74,8 @@ jobs:
               mc mb local/drift-reports --ignore-existing || true
               mc anonymous set public local/mlflow-artifacts || true
               mc anonymous set public local/drift-reports || true
-              echo "MinIO buckets ready and public"
+              mc ls local/
+              echo "MinIO setup complete"
             '
 
       # ── Python / ML Serving ────────────────────────────────────────
