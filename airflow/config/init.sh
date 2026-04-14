@@ -17,7 +17,7 @@ echo "Creating Airflow connections..."
 airflow connections add \
     'evidently_service' \
     --conn-type http \
-    --conn-host http://evidently-service \
+    --conn-host evidently-service \
     --conn-port 8002 \
     --conn-description "Evidently AI drift detection microservice" \
     2>/dev/null && echo "  evidently_service connection created" \

@@ -287,6 +287,7 @@ services:
       context: .
       dockerfile: Dockerfile.airflow
     container_name: fraud_airflow_webserver
+    network_mode: fraud-detection
     ports:
       - "8080:8080"
     command: bash -c "bash /opt/airflow/config/init.sh webserver"
@@ -321,8 +322,6 @@ services:
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
       <<: *healthcheck-base
-    networks:
-      - fraud-detection
     restart: unless-stopped
     <<: *logging
 
@@ -331,6 +330,7 @@ services:
       context: .
       dockerfile: Dockerfile.airflow
     container_name: fraud_airflow_scheduler
+    network_mode: fraud-detection
     command: bash -c "bash /opt/airflow/config/init.sh scheduler"
     depends_on:
       postgres:
@@ -355,8 +355,6 @@ services:
       - ./data:/opt/airflow/data
       - ./models:/opt/airflow/models
       - ./monitoring/reports:/opt/airflow/monitoring/reports
-    networks:
-      - fraud-detection
     restart: unless-stopped
     <<: *logging
 
