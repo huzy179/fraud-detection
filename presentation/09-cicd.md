@@ -1,4 +1,4 @@
-# 08 — CI/CD: GitHub Actions
+# 09 — CI/CD: GitHub Actions
 
 ## Tổng quan
 
@@ -16,29 +16,32 @@ GitHub Actions CI/CD pipeline đảm bảo chất lượng code qua mỗi commit
 push / pull_request (main)
         │
         ▼
-┌──────────────────────────────────────────────┐
-│  Job 1: lint-and-test                         │
-│  ──────────────────────────────────────────   │
-│  • Python 3.9: lint (flake8) + pytest          │
-│    ├── ML Serving: flake8 + pytest             │
-│    └── ML Pipeline: flake8 + pytest            │
-│  • Node.js 18: npm ci + npm run build          │
-│    └── Frontend: build test                    │
-│                                              │
-│  PostgreSQL service container                  │
-└────────────────────┬─────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│  Job 1: lint-and-test                                         │
+│  ─────────────────────────────────────────────────────────── │
+│  • Python 3.9: lint (flake8) + pytest                         │
+│    ├── ML Serving: flake8 + pytest                            │
+│    ├── ML Pipeline: flake8 + import test                       │
+│    └── Evidently Service: flake8                              │
+│  • Node.js 18: npm ci + npm run build                         │
+│    └── Frontend: build test                                   │
+│                                                               │
+│  PostgreSQL + MinIO service containers                         │
+│    ├── MinIO health check + bucket setup (mc alias → mb)      │
+└─────────────────────┬────────────────────────────────────────┘
                      │ ✅ passed
                      ▼
-┌──────────────────────────────────────────────┐
-│  Job 2: docker-build (only on main push)     │
-│  ──────────────────────────────────────────   │
-│  • API:       fraud-api       → GHCR          │
-│  • Pipeline:  fraud-ml-pipeline → GHCR         │
-│  • Airflow:   fraud-airflow   → GHCR           │
-│  • Frontend:  fraud-frontend → GHCR            │
-│                                              │
-│  Permissions: contents:read, packages:write   │
-└──────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│  Job 2: docker-build (only on main push)                      │
+│  ─────────────────────────────────────────────────────────── │
+│  • API:         fraud-api         → GHCR                     │
+│  • Pipeline:    fraud-ml-pipeline → GHCR                      │
+│  • Evidently:   fraud-evidently   → GHCR                      │
+│  • Airflow:     fraud-airflow     → GHCR                      │
+│  • Frontend:    fraud-frontend    → GHCR                     │
+│                                                               │
+│  Permissions: contents:read, packages:write                  │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -83,7 +86,7 @@ push / pull_request (main)
     npm run build
 ```
 
-### PostgreSQL Service Container
+### PostgreSQL + MinIO Service Containers
 
 ```yaml
 services:
@@ -100,6 +103,15 @@ services:
       --health-interval 10s
       --health-timeout 5s
       --health-retries 5
+
+  minio:
+    image: minio/minio:latest
+    env:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+    ports:
+      - 9000:9000
+      - 9001:9001
 ```
 
 ---
@@ -127,12 +139,13 @@ services:
       ghcr.io/${{ github.repository }}/fraud-api:latest
 ```
 
-**4 Docker images được build:**
+**5 Docker images được build:**
 
 | Image | Context | Tags |
 |-------|---------|------|
 | `fraud-api` | `./services/ml-serving` | `${{ github.sha }}`, `latest` |
 | `fraud-ml-pipeline` | `./services/ml-pipeline` | `${{ github.sha }}`, `latest` |
+| `fraud-evidently` | `./services/evidently` | `${{ github.sha }}`, `latest` |
 | `fraud-airflow` | `.` (root) | `${{ github.sha }}`, `latest` |
 | `fraud-frontend` | `./services/frontend` | `${{ github.sha }}`, `latest` |
 

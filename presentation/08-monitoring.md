@@ -209,4 +209,87 @@ groups:
 - Nhưng Grafana dashboard cần continuous monitoring
 - Solution: API endpoint `/metrics` exposes `fraud_drift_score` gauge
 - `detect_drift.py` writes `drift_alert.json` → API reads on `/metrics` call → updates gauge
-- coupling: drift script không cần push to Prometheus directly
+- Reports được upload lên MinIO `drift-reports` bucket — API đọc từ đó
+
+---
+
+## Grafana Dashboard Layout (10 panels)
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Overview Row                                                │
+│  [Total Requests] [Latency p95] [Total Predictions]         │
+│  [Fraud Predictions] [Fraud Rate %]                         │
+├─────────────────────────────────────────────────────────────┤
+│  Time Series Row                                            │
+│  [Request Rate by Endpoint] ────────────────────────────    │
+│  [Latency Percentiles p50/p95/p99] ───────────────────      │
+│  [Fraud vs Legit Bar Chart] ────────────────────────────     │
+│  [Requests per Hour] ────────────────────────────────       │
+├─────────────────────────────────────────────────────────────┤
+│  Evidently Drift Row                                        │
+│  [Drift Score ⚠️] [Drift Status ✅/🚨] [Report Link 📄]      │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Panel thresholds cấu hình
+
+| Panel | Warning | Critical |
+|-------|---------|----------|
+| Latency p95 | > 500ms (yellow) | > 2000ms (red) |
+| Fraud Rate | > 2% (yellow) | > 5% (red) |
+| Fraud Predictions | — | > 5 count (red) |
+| Drift Score | ≥ 0.5 (orange) | ≥ 0.8 (red) |
+
+---
+
+## Alerting Rules (Prometheus)
+
+```yaml
+# monitoring/prometheus_alerts.yml
+groups:
+  - name: fraud_api_alerts
+    rules:
+      - alert: HighAPILatency
+        expr: histogram_quantile(0.95, rate(fraud_api_latency_seconds_bucket[5m])) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "API p95 latency above 500ms"
+
+      - alert: HighFraudRate
+        expr: fraud_rate_estimated > 0.02
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Fraud rate above 2%"
+
+      - alert: DataDriftDetected
+        expr: fraud_drift_score >= 0.5
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Data drift detected — model retraining recommended"
+          description: "Drift score: {{ $value }}. Check Evidently report."
+```
+
+---
+
+## Ops Cheat Sheet
+
+```bash
+# 1. Check Prometheus targets
+curl "http://localhost:9090/api/v1/query?query=up"
+
+# 2. Reload Prometheus config (không restart)
+curl -X POST http://localhost:9090/-/reload
+
+# 3. Check Grafana datasource
+curl -u admin:admin http://localhost:3002/api/datasources/1
+
+# 4. Force Prometheus scrape
+curl -X POST http://localhost:9090/api/v1/admin/tsdb/relabel
+```

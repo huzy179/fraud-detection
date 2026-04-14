@@ -110,7 +110,8 @@ python scripts/detect_drift.py
 3. detect_data_drift()    ── Evidently DataDriftPreset
    └── Population Stability Index (PSI) trên từng feature
 4. should_retrain()       ── Nếu drift_score >= 0.5 → recommend retrain
-5. save drift_alert.json  ── Flag file cho Airflow/API
+5. upload_to_minio()       ── Upload report → MinIO bucket drift-reports
+6. save drift_alert.json  ── Flag file cho Airflow/API
 ```
 
 **Drift score interpretation:**
@@ -119,7 +120,8 @@ python scripts/detect_drift.py
 - `1.0`: full drift → cần retrain ngay
 
 **Outputs:**
-- `monitoring/reports/data_drift_report.html` — Evidently HTML report
+- `monitoring/reports/data_drift_report.html` — Evidently HTML report (local)
+- MinIO `drift-reports/` bucket — HTML + JSON reports (S3)
 - `monitoring/reports/drift_alert.json` — `{ drift_detected, drift_score, retrain_recommended }`
 
 ---
@@ -173,3 +175,4 @@ Export transactions từ PostgreSQL để so sánh với training data cho drift
 - Feature-level drift detection (biết CHÍNH XÁC feature nào drifted)
 - Tích hợp Prometheus gauge cho monitoring dashboard
 - HTML report cho non-technical stakeholders
+- Reports được upload lên MinIO `drift-reports` bucket — truy cập được từ bất kỳ đâu

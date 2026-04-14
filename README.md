@@ -8,54 +8,59 @@ Hệ thống phát hiện giao dịch thẻ tín dụng gian lận trong thời 
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│                        Client / Demo                              │
-│                  http://localhost:3000 (Next.js)                  │
+│  Client / Demo                                                   │
+│  http://localhost:3000 (Frontend — Next.js 14)                  │
 └────────────────────────────┬─────────────────────────────────────┘
-                             │ HTTP POST /predict
+                             │ HTTP POST /transactions
                              ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│  API Service (FastAPI)  ── port 8000                             │
-│  • ML Inference (KNN lookup + LightGBM fallback)                 │
+│  API Service (FastAPI)  ── port 8000                            │
+│  • ML Inference (KNN lookup + LightGBM fallback)               │
 │  • SHAP Explainability                                          │
-│  • Transaction CRUD (PostgreSQL)                                 │
+│  • Transaction CRUD (PostgreSQL)                                │
 │  • Prometheus /metrics endpoint                                  │
+│  • Drift status + report endpoints                              │
 └──────┬───────────────┬──────────────────────┬───────────────────┘
        │               │                      │
        ▼               ▼                      ▼
 ┌─────────────┐  ┌──────────┐       ┌─────────────┐
-│ PostgreSQL  │  │ MLflow   │       │ Prometheus  │
-│ port 5432   │  │ port 5001│       │ port 9090   │
-│ • Txn store│  │ • Metrics│       └──────┬──────┘
-│ • Airflow  │  │ • Model  │              │
-└─────────────┘  └──────────┘              ▼
-                                   ┌─────────────┐
-                                   │  Grafana   │
-                                   │ port 3002  │
-                                   └─────────────┘
+│ PostgreSQL  │  │  MinIO   │       │ Prometheus  │
+│ port 5432   │  │:9000/9001│       │ port 9090   │
+│• Txn store  │  │• MLflow  │       └──────┬──────┘
+│• Airflow    │  │  artifacts│             │
+│• MLflow DB  │  │• drift    │             ▼
+└─────────────┘  │  reports │       ┌─────────────┐
+                 └─────┬────┘       │  Grafana    │
+                       ▼           │ port 3002    │
+              ┌──────────────┐    └─────────────┘
+              │   MLflow     │
+              │ port 5001    │
+              └──────────────┘
 
 ┌──────────────────────────────────────────────────────────────────┐
-│  Airflow (port 8080) — DAG: preprocess → train → drift check    │
+│  Airflow (port 8080) — DAG: preprocess → train → export → drift │
+│  Evidently Service (port 8002) — Drift detection HTTP API        │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-**8 services:** PostgreSQL · MLflow · FastAPI · Next.js · Prometheus · Grafana · Airflow (webserver + scheduler) · ML Pipeline (one-shot)
+**12 services:** PostgreSQL · MinIO · MLflow · Evidently · FastAPI · **Next.js Frontend** · Prometheus · Grafana · Airflow (webserver + scheduler) · ML Pipeline (one-shot)
 
 ---
 
 ## Stack công nghệ
 
-| Thành phần     | Công nghệ                                | Port  |
-|---------------|------------------------------------------|-------|
-| ML Model      | LightGBM / XGBoost / RandomForest         | —     |
-| ML Tracking   | MLflow + PostgreSQL backend              | 5001  |
-| API Server    | FastAPI + Uvicorn + SQLAlchemy           | 8000  |
-| Database      | PostgreSQL 15                             | 5432  |
-| Frontend      | Next.js 14 (TypeScript)                  | 3000  |
-| Metrics       | Prometheus v2.47                         | 9090  |
-| Visualization | Grafana 10.1                             | 3002  |
-| Orchestration | Apache Airflow (LocalExecutor)          | 8080  |
-| CI/CD         | GitHub Actions                           | —     |
-| Container     | Docker Compose                           | —     |
+| Thành phần     | Công nghệ                                  | Port  |
+|---------------|--------------------------------------------|-------|
+| ML Model      | LightGBM / XGBoost / RandomForest           | —     |
+| ML Tracking   | MLflow + PostgreSQL backend                | 5001  |
+| API Server    | FastAPI + Uvicorn + SQLAlchemy             | 8000  |
+| Database      | PostgreSQL 15                               | 5432  |
+| Frontend      | Next.js 14 (TypeScript)                    | 3000  |
+| Metrics       | Prometheus v2.47                           | 9090  |
+| Visualization | Grafana 10.1                              | 3002  |
+| Orchestration | Apache Airflow (LocalExecutor)           | 8080  |
+| CI/CD         | GitHub Actions                             | —     |
+| Container     | Docker Compose                             | —     |
 
 ---
 
@@ -79,14 +84,16 @@ docker compose ps
 
 **Các service có sẵn:**
 
-| Service      | URL                          | Tài khoản         |
-|-------------|------------------------------|-------------------|
-| Frontend    | http://localhost:3000        | —                 |
-| FastAPI     | http://localhost:8000/docs   | —                 |
-| MLflow UI   | http://localhost:5001        | —                 |
-| Prometheus  | http://localhost:9090         | —                 |
-| Grafana     | http://localhost:3002        | admin / admin     |
-| Airflow     | http://localhost:8080        | airflow / airflow |
+| Service         | URL                          | Tài khoản          |
+|---------------|------------------------------|--------------------|
+| Frontend      | http://localhost:3000        | —                  |
+| FastAPI       | http://localhost:8000/docs   | —                  |
+| MLflow UI     | http://localhost:5001        | —                  |
+| Prometheus    | http://localhost:9090        | —                  |
+| Grafana       | http://localhost:3002        | admin / admin      |
+| Airflow       | http://localhost:8080        | admin / admin      |
+| MinIO Console | http://localhost:9001        | minioadmin / minioadmin123 |
+| Evidently     | http://localhost:8002        | —                  |
 
 ### Cách 2: Chạy từng service (Development)
 
@@ -126,17 +133,18 @@ docker compose restart api
 
 ## API Endpoints
 
-| Method | Path                       | Mô tả                            |
+| Method | Path                       | Mô tả                             |
 |--------|----------------------------|----------------------------------|
-| `GET`  | `/health`                  | Health check + model info         |
+| `GET`  | `/health`                  | Health check + model info        |
 | `POST` | `/predict`                 | Dự đoán fraud (KNN serving)      |
 | `POST` | `/explain`                 | Giải thích SHAP-based            |
-| `POST` | `/transactions`            | Tạo giao dịch + dự đoán         |
+| `POST` | `/transactions`            | Tạo giao dịch + dự đoán          |
 | `GET`  | `/transactions`            | Danh sách giao dịch (paginated)  |
-| `GET`  | `/transactions/stats`      | Thống kê fraud                  |
+| `GET`  | `/transactions/stats`      | Thống kê fraud                   |
 | `GET`  | `/drift-status`            | JSON drift status (Evidently)    |
 | `GET`  | `/drift-report`            | HTML drift report (Evidently)     |
-| `GET`  | `/metrics`                 | Prometheus metrics                |
+| `POST` | `/run-drift`               | Trigger drift detection          |
+| `GET`  | `/metrics`                 | Prometheus metrics               |
 
 ### Ví dụ predict
 
@@ -160,28 +168,28 @@ curl -X POST http://localhost:8000/predict \
 
 ## Kết quả mô hình
 
-Sau khi chạy `train.py`, 3 models được so sánh qua 5-fold Stratified CV. Kết quả mẫu (sẽ khác nhau tùy random seed và dataset):
+Sau khi chạy `train.py`, 3 models được so sánh qua 5-fold Stratified CV:
 
 | Model           | Precision | Recall | F1 Score | ROC-AUC | Threshold |
 |-----------------|:---------:|:------:|:--------:|:-------:|:---------:|
-| **LightGBM** ⭐ | ~0.84     | ~0.84  | **~0.84** | ~0.98  | ~0.53     |
-| XGBoost         | ~0.85     | ~0.84  | ~0.84    | ~0.98  | ~0.53     |
-| RandomForest    | ~0.82     | ~0.81  | ~0.82    | ~0.98  | ~0.60     |
+| **LightGBM** ⭐ | ~0.86     | ~0.83  | **~0.84** | ~0.98  | ~0.93     |
+| XGBoost         | ~0.85     | ~0.83  | ~0.84    | ~0.98  | ~0.94     |
+| RandomForest    | ~0.90     | ~0.78  | ~0.84    | ~0.98  | ~0.89     |
 
 > Model tốt nhất (F1 cao nhất) được lưu tại `models/lgbm_model.txt`
-> Metrics: F1 = 2×(Precision×Recall)/(Precision+Recall) — harmonic mean cân bằng precision/recall
+> Threshold ~0.93: giao dịch chỉ bị gắn cờ fraud khi xác suất ≥ 93% (cao do dữ liệu imbalanced)
 
 ---
 
 ## Biến môi trường
 
-| Variable              | Default                                     | Mô tả                  |
-|----------------------|--------------------------------------------|------------------------|
-| `FRAUD_THRESHOLD`     | `0.5` (code), `0.93` (Docker)             | Ngưỡng phát hiện fraud |
-| `MODEL_PATH`          | `/app/models` (Docker)                     | Đường dẫn model files  |
-| `DATABASE_URL`        | `postgresql://postgres:postgres@postgres:5432/` | PostgreSQL connection |
-| `MLFLOW_TRACKING_URI` | `http://mlflow:5000`                       | MLflow server URL      |
-| `NEXT_PUBLIC_API_URL` | `http://localhost:8000`                   | FastAPI URL (frontend) |
+| Variable              | Default                                        | Mô tả                    |
+|----------------------|-----------------------------------------------|--------------------------|
+| `FRAUD_THRESHOLD`     | `0.5` (code), `0.93` (Docker env)             | Ngưỡng phát hiện fraud   |
+| `MODEL_PATH`          | `/app/models` (Docker)                        | Đường dẫn model files    |
+| `DATABASE_URL`        | `postgresql://postgres:postgres@postgres:5432/` | PostgreSQL connection  |
+| `MLFLOW_TRACKING_URI` | `http://mlflow:5000`                          | MLflow server URL        |
+| `NEXT_PUBLIC_API_URL` | `http://localhost:8000`                       | FastAPI URL (frontend)   |
 
 ---
 
@@ -208,7 +216,7 @@ docker compose logs -f mlflow
 
 ```
 fraud-detection/
-├── docker-compose.yml           # Orchestration (8 services)
+├── docker-compose.yml           # Orchestration (12 services)
 ├── Dockerfile.airflow           # Airflow custom image
 ├── .github/workflows/ci.yml    # CI/CD pipeline
 │
@@ -218,9 +226,9 @@ fraud-detection/
 │
 ├── models/
 │   ├── lgbm_model.txt        # Active model (LightGBM)
-│   ├── xgboost_model.json     # XGBoost
-│   ├── rf_model.joblib        # RandomForest
-│   └── best_config.json       # Best model config (sau khi train)
+│   ├── xgboost_model.json    # XGBoost
+│   ├── rf_model.joblib       # RandomForest
+│   └── best_config.json      # Best model config + threshold
 │
 ├── services/
 │   ├── ml-pipeline/
@@ -228,12 +236,12 @@ fraud-detection/
 │   │   │   ├── preprocess.py       # StandardScaler, SMOTE, stratified split
 │   │   │   ├── train.py            # 5-fold CV, 3 models, threshold tuning
 │   │   │   ├── detect_drift.py     # Evidently drift detection
-│   │   │   └── export_transactions.py
+│   │   │   └── export_transactions.py  # PostgreSQL → current.parquet
 │   │   ├── requirements.txt
 │   │   └── Dockerfile
 │   │
 │   ├── ml-serving/
-│   │   ├── main.py            # FastAPI: inference + CRUD + metrics
+│   │   ├── main.py            # FastAPI: KNN inference + CRUD + metrics
 │   │   ├── requirements.txt
 │   │   └── Dockerfile
 │   │
@@ -244,39 +252,38 @@ fraud-detection/
 │       └── Dockerfile
 │
 ├── airflow/
-│   ├── dags/fraud_pipeline_dag.py  # DAG: preprocess → train → drift
+│   ├── dags/fraud_pipeline_dag.py  # DAG: download → preprocess → train → export → drift
 │   ├── logs/
 │   └── config/
 │
 ├── mlflow_artifacts/           # MLflow file artifact store
 │
 ├── monitoring/
-│   ├── prometheus.yml          # Prometheus scrape config
+│   ├── prometheus.yml          # Prometheus scrape config (2 targets)
 │   ├── reports/                # Evidently HTML drift reports
-│   └── grafana/provisioning/   # Auto-provisioned dashboards
+│   └── grafana/provisioning/   # Auto-provisioned dashboards + datasources
 │
 └── postgres-init/              # PostgreSQL init scripts
 ```
 
 ---
 
-## Thuyết trình
+## Tài liệu thuyết trình chi tiết
 
 Tài liệu thuyết trình chi tiết cho từng service nằm trong folder `presentation/`:
 
-```
-presentation/
-├── README.md              # Mục lục + thứ tự trình bày
-├── 01-overview.md         # Kiến trúc tổng quan
-├── 02-ml-pipeline.md      # Batch ML workflow
-├── 03-ml-serving.md       # FastAPI core service
-├── 04-frontend.md         # Next.js dashboard
-├── 05-mlflow.md          # Experiment tracking
-├── 06-airflow.md          # DAG orchestration
-├── 07-monitoring.md       # Prometheus + Grafana
-└── 08-cicd.md           # GitHub Actions
-```
+| # | Phần | File |
+|---|------|------|
+| 1 | Overview | `presentation/01-overview.md` |
+| 2 | **Frontend** (Next.js Dashboard) | `presentation/02-frontend.md` |
+| 3 | ML Pipeline (preprocess → train → drift) | `presentation/03-ml-pipeline.md` |
+| 4 | Evidently (drift detection) | `presentation/04-evidently.md` |
+| 5 | MLflow (experiment tracking) | `presentation/05-mlflow.md` |
+| 6 | ML Serving (FastAPI real-time) | `presentation/06-ml-serving.md` |
+| 7 | Airflow (DAG orchestration) | `presentation/07-airflow.md` |
+| 8 | Monitoring (Prometheus + Grafana) | `presentation/08-monitoring.md` |
+| 9 | CI/CD (GitHub Actions) | `presentation/09-cicd.md` |
 
 ---
 
-MIT — Cập nhật: 2026-04-09
+MIT — Cập nhật: 2026-04-15

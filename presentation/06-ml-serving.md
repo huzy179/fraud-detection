@@ -1,4 +1,4 @@
-# 03 — ML Serving: FastAPI Core Service
+# 05 — ML Serving: FastAPI Core Service
 
 ## Tổng quan
 
@@ -38,9 +38,11 @@ Service **ml-serving** là trái tim của hệ thống — chạy trên FastAPI
 
 | Method | Path | Mô tả |
 |--------|------|--------|
-| `GET` | `/drift-status` | JSON: drift status từ Evidently |
-| `GET` | `/drift-report` | HTML report từ Evidently |
+| `GET` | `/drift-status` | JSON: drift status từ Evidently service (port 8002) |
+| `GET` | `/drift-report` | HTML report từ Evidently (MinIO bucket) |
 | `GET` | `/metrics` | Prometheus metrics (PlainText) |
+
+> Drift endpoints gọi Evidently microservice (HTTP) và đọc reports từ MinIO.
 
 ---
 
@@ -142,6 +144,11 @@ is_fraud = prob >= FRAUD_THRESHOLD
 | `MODEL_PATH` | `./models` | Đường dẫn model files |
 | `DATA_DIR` | `./data` | Đường dẫn processed data |
 | `DATABASE_URL` | `postgresql://...` | PostgreSQL connection string |
+| `MINIO_ENDPOINT` | `minio:9000` | MinIO S3 endpoint |
+| `MINIO_ACCESS_KEY` | `minioadmin` | MinIO access key |
+| `MINIO_SECRET_KEY` | `minioadmin123` | MinIO secret key |
+| `MINIO_BUCKET_REPORTS` | `drift-reports` | MinIO bucket cho drift reports |
+| `EVIDENTLY_SERVICE_URL` | `http://evidently-service:8002` | Evidently service endpoint |
 
 ---
 
@@ -174,3 +181,52 @@ is_fraud = prob >= FRAUD_THRESHOLD
 - 1 table `transactions` với 30 feature columns (V1-V28, Amount, Time)
 - Store cả raw features để có thể tái sử dụng cho drift detection
 - `fraud_probability` và `is_fraud` được compute tại write time, không compute lại
+
+---
+
+## Database Schema
+
+```sql
+CREATE TABLE transactions (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    V1  FLOAT, V2  FLOAT, V3  FLOAT, V4  FLOAT, V5  FLOAT,
+    V6  FLOAT, V7  FLOAT, V8  FLOAT, V9  FLOAT, V10 FLOAT,
+    V11 FLOAT, V12 FLOAT, V13 FLOAT, V14 FLOAT, V15 FLOAT,
+    V16 FLOAT, V17 FLOAT, V18 FLOAT, V19 FLOAT, V20 FLOAT,
+    V21 FLOAT, V22 FLOAT, V23 FLOAT, V24 FLOAT, V25 FLOAT,
+    V26 FLOAT, V27 FLOAT, V28 FLOAT,
+    Amount  FLOAT NOT NULL,
+    Time    FLOAT NOT NULL,
+    fraud_probability FLOAT,
+    is_fraud BOOLEAN,
+    confidence VARCHAR(10),
+    created_at TIMESTAMP DEFAULT NOW()
+);
+```
+
+---
+
+## Prometheus Metrics Design (toàn bộ)
+
+| Metric | Type | Labels | Mô tả |
+|--------|------|--------|--------|
+| `fraud_api_requests_total` | Counter | `endpoint`, `method` | Tổng số requests |
+| `fraud_api_latency_seconds` | Histogram | `endpoint` | Phân bố latency (p50/p95/p99) |
+| `fraud_predictions_total` | Counter | `prediction` | `fraud` hoặc `legit` |
+| `fraud_rate_estimated` | Gauge | — | Fraud rate hiện tại (từ DB) |
+| `fraud_drift_score` | Gauge | — | Drift score từ Evidently (0→1) |
+
+### Ví dụ Prometheus query
+
+```promql
+# Requests/giây theo endpoint
+rate(fraud_api_requests_total[1m])
+
+# p95 latency
+histogram_quantile(0.95, rate(fraud_api_latency_seconds_bucket[5m]))
+
+# Tỷ lệ fraud trong 5 phút
+rate(fraud_predictions_total{prediction="fraud"}[5m])
+  /
+rate(fraud_predictions_total[5m])
+```

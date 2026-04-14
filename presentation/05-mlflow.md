@@ -1,4 +1,4 @@
-# 05 — MLflow: Experiment Tracking & Model Registry
+# 04 — MLflow: Experiment Tracking & Model Registry
 
 ## Tổng quan
 
@@ -6,7 +6,7 @@ MLflow là centralized experiment tracking server cho toàn bộ ML workflow —
 
 - **Port:** 5001 (external) / 5000 (container internal)
 - **Backend store:** PostgreSQL `mlflow_db`
-- **Artifact root:** `./mlflow_artifacts/`
+- **Artifact root:** MinIO S3 `s3://mlflow-artifacts/` (bucket: `mlflow-artifacts`)
 - **Access:** http://localhost:5001
 
 ---
@@ -95,22 +95,26 @@ with mlflow.start_run(run_name="LightGBM") as run:
 ## MLflow Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│ MLflow Tracking Server (port 5001)                       │
-│                                                         │
-│  PostgreSQL ─── Backend Store (mlflow_db)               │
-│    Tables: experiments, runs, metrics, params, tags     │
-│                                                         │
-│  mlflow_artifacts/ ─── File Store (artifacts)            │
-│    /run_id/model.joblib                                 │
-└─────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────┐
+│ MLflow Tracking Server (port 5001)                              │
+│                                                               │
+│  PostgreSQL ─── Backend Store (mlflow_db)                      │
+│    Tables: experiments, runs, metrics, params, tags            │
+│                                                               │
+│  MinIO S3 ─── Artifact Store (s3://mlflow-artifacts/)         │
+│    /run_id/model.joblib                                       │
+│    Buckets: mlflow-artifacts, drift-reports                    │
+└───────────────────────────────────────────────────────────────┘
         ▲
         │ HTTP API (mlflow.* SDK)
         │
-┌─────────────────────────────────────────────────────────┐
-│ train.py                                                 │
-│   mlflow.start_run() → train → mlflow.log_metrics()     │
-└─────────────────────────────────────────────────────────┘
+        │
+┌───────────────────────────────────────────────────────────────┐
+│ train.py                                                        │
+│   mlflow.set_tracking_uri("http://mlflow:5000")                 │
+│   mlflow.start_run() → train → mlflow.log_metrics()             │
+│   Artifacts uploaded to MinIO S3                               │
+└───────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -132,10 +136,15 @@ with mlflow.start_run(run_name="LightGBM") as run:
 - **Không cần login**: MLflow server chạy local, team có thể truy cập qua network
 - **Model registry tích hợp**: version models, stage transitions (staging → production)
 
+### Tại sao dùng MinIO làm artifact store thay vì local filesystem?
+- **Shared storage**: artifacts có thể truy cập từ bất kỳ container nào (ml-pipeline, api, airflow)
+- **Persistence**: không phụ thuộc vào volume mount trong Docker
+- **S3-compatible**: MLflow hỗ trợ S3 natively, upload/download tự động
+- **Production-ready**: dễ dàng thay bằng AWS S3 khi deploy lên cloud
+
 ### Tại sao PostgreSQL làm backend store?
 - PostgreSQL là shared database giữa tất cả services → không cần thêm database server
 - MLflow backend store chỉ cần ACID guarantees, không cần OLAP capabilities
-- **Artifact storage** (file store) vẫn dùng local filesystem (`mlflow_artifacts/`)
 
 ### Tại sao `log_artifact` dùng `/tmp/model.joblib` thay vì path trực tiếp?
 - `mlflow.log_artifact()` log một file đã tồn tại trên disk

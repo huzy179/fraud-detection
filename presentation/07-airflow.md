@@ -42,7 +42,7 @@ fraud_ml_pipeline (runs @daily)
 # Mở browser
 open http://localhost:8080
 
-# Login: airflow / airflow (default)
+# Login: admin / admin (không phải airflow/airflow)
 ```
 
 ### Trigger DAG manually
@@ -199,3 +199,70 @@ catchup=False  # Không chạy lại những DAG runs miss khi Airflow down
 - Airflow scheduler chạy task trong subprocess
 - `PYTHONPATH=/opt/airflow/services/ml-pipeline` để scripts có thể import modules từ thư mục đó
 - Prevents `ModuleNotFoundError` khi chạy `python scripts/preprocess.py`
+
+---
+
+## Cấu hình chi tiết
+
+### Fernet Key (bắt buộc)
+```bash
+# Generate Fernet key (phải có trước khi chạy Airflow)
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+Lưu vào `.env`:
+```env
+AIRFLOW_FERNET_KEY=<generated-key>
+AIRFLOW_SECRET_KEY=<random-secret>
+```
+
+### Init Script (`config/init.sh`)
+```bash
+#!/bin/bash
+# Gọi bởi webserver/scheduler containers
+airflow db init           # Khởi tạo metadata DB
+airflow users create \    # Tạo admin user
+  --username admin \
+  --password admin \
+  --firstname Admin \
+  --lastname User \
+  --role Admin \
+  --email admin@fraud.local
+```
+
+### DAG Configuration chi tiết
+
+| Property | Giá trị | Ý nghĩa |
+|----------|---------|---------|
+| `schedule_interval` | `@daily` | Chạy lúc 00:00 mỗi ngày |
+| `start_date` | `days_ago(1)` | Bắt đầu từ hôm qua |
+| `catchup` | `False` | Không backfill khi restart |
+| `max_active_runs` | `1` | Chỉ 1 DAG run đồng thời |
+| `concurrency` | `10` | Tối đa 10 tasks song song |
+
+### Retry Policy
+```python
+train = BashOperator(
+    task_id="train_model",
+    bash_command="...",
+    retries=2,
+    retry_delay=timedelta(minutes=5),
+    execution_timeout=timedelta(minutes=30),
+)
+```
+
+---
+
+## Logging & Debug
+
+```bash
+# Xem logs của task cụ thể
+docker compose logs airflow-scheduler --follow | grep train_model
+
+# Check task status
+docker compose exec airflow-scheduler \
+  airflow tasks states fraud_ml_pipeline 2026-04-15T00:00:00
+
+# Clear failed DAG run
+docker compose exec airflow-scheduler \
+  airflow dags clear fraud_ml_pipeline -d --yes
+```

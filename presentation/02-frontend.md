@@ -1,11 +1,11 @@
-# 04 — Frontend: Next.js Dashboard
+# 08 — Frontend: Next.js Dashboard
 
 ## Tổng quan
 
-Frontend là Next.js 13 web app (port 3000) với dark theme, cung cấp giao diện real-time để test transaction và xem fraud predictions.
+Frontend là Next.js 14 web app (port 3000) với dark theme, cung cấp giao diện real-time để test transaction và xem fraud predictions.
 
 - **Location:** [services/frontend/](services/frontend/)
-- **Framework:** Next.js (React, TypeScript)
+- **Framework:** Next.js 14 (React, TypeScript)
 - **Styling:** Custom CSS (dark theme, no Tailwind)
 - **Data fetching:** Axios + useState/useEffect
 - **API base:** `http://localhost:8000` (hoặc `NEXT_PUBLIC_API_URL` env)
@@ -176,3 +176,47 @@ Theme: Dark mode `#0a0f1e` background, high contrast text.
 - Dataset nhỏ (fraud-detection demo), không cần full component library
 - Custom CSS cho dark theme trực tiếp, control hoàn toàn
 - Không có dependency overhead
+
+---
+
+## Demo Checklist (khi thuyết trình)
+
+1. **Mở dashboard:** `http://localhost:3000`
+2. **Submit legit sample:** Click "Load Legit Sample" → Submit → verify green badge
+3. **Submit fraud sample:** Click "Load Fraud Sample" → Submit → verify red badge
+4. **Check transaction table:** Verify recent transactions appear
+5. **Verify KPIs:** Total Transactions, Fraud Rate update after submission
+
+### API calls tương ứng
+
+```
+GET  /transactions?limit=20     → Load table
+GET  /transactions/stats         → Load KPI cards
+POST /transactions               → Submit prediction
+```
+
+### Pre-extracted sample data
+
+```typescript
+const SAMPLE_LEGIT = {
+  V1: -0.67, V2: 1.41, V3: -1.11, V4: -1.33, V5: 1.39,
+  V6: -1.31, V7: 1.89, V8: -0.61, V9: 0.31, V10: 0.65,
+  V11: -0.86, V12: -0.23, V13: -0.20, V14: 0.27, V15: -0.05,
+  V16: -0.74, V17: -0.61, V18: -0.39, V19: -0.16, V20: 0.39,
+  V21: 0.08, V22: 0.81, V23: -0.22, V24: 0.71, V25: -0.14,
+  V26: 0.05, V27: 0.53, V28: 0.29,
+  Amount: 23.00, Time: 160760.00
+};
+
+const SAMPLE_FRAUD = {
+  V1: -1.27, V2: -0.29, V3: 0.18, V4: 1.76, V5: -1.21,
+  V6: 0.52, V7: -0.39, V8: 0.34, V9: -0.24, V10: -0.17,
+  V11: 1.10, V12: 0.36, V13: -0.50, V14: 1.11, V15: -0.15,
+  V16: 0.22, V17: -0.90, V18: -0.12, V19: 0.24, V20: 0.24,
+  V21: 0.24, V22: 0.28, V23: 0.19, V24: 0.27, V25: 0.19,
+  V26: -0.12, V27: -0.26, V28: -0.08,
+  Amount: 0.01, Time: 57007.00
+};
+```
+
+> **Lưu ý:** Amount = 0.01 cho fraud sample là test case điển hình — fraudsters thường dùng số tiền nhỏ để tránh bị phát hiện.
