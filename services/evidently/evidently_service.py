@@ -152,6 +152,15 @@ app = FastAPI(
 )
 
 
+@app.get("/")
+async def root():
+    return {
+        "service": "evidently",
+        "status": "running",
+        "message": "Use /docs for API docs, /health for health check, and /run to generate drift reports.",
+    }
+
+
 @app.get("/health")
 async def health():
     return {"status": "healthy", "service": "evidently"}
@@ -183,12 +192,20 @@ async def list_reports():
     """List available reports in MinIO drift-reports bucket."""
     try:
         s3 = _get_s3()
-        resp = s3.list_objects_v2(Bucket=MINIO_BUCKET, Prefix="drift-reports/")
-        files = [
-            obj["Key"].replace("drift-reports/", "")
-            for obj in resp.get("Contents", [])
-            if obj["Key"] != "drift-reports/"
-        ]
+        resp = s3.list_objects_v2(Bucket=MINIO_BUCKET)
+
+        files = []
+        for obj in resp.get("Contents", []):
+            key = obj["Key"]
+            # Support both formats:
+            # 1) New keys: data_drift_report.html
+            # 2) Legacy keys: drift-reports/data_drift_report.html
+            if key.endswith("/"):
+                continue
+            if key.startswith("drift-reports/"):
+                key = key.replace("drift-reports/", "", 1)
+            files.append(key)
+
         return {"reports": files}
     except ClientError as e:
         raise HTTPException(502, f"MinIO error: {e}")
@@ -204,15 +221,25 @@ async def get_report(name: str):
         media = "application/json" if name.endswith(".json") else "text/html"
         return FileResponse(str(local_path), media_type=media)
 
-    # Fallback to MinIO
-    s3_key = f"drift-reports/{name}"
+    # Fallback to MinIO. Try current key format first, then legacy prefixed key.
+    candidate_keys = [name, f"drift-reports/{name}"]
     try:
         s3 = _get_s3()
-        s3.download_file(MINIO_BUCKET, s3_key, str(local_path))
-    except ClientError as e:
-        code = e.response.get("Error", {}).get("Code", "")
-        if code == "404":
+        downloaded = False
+        for s3_key in candidate_keys:
+            try:
+                s3.download_file(MINIO_BUCKET, s3_key, str(local_path))
+                downloaded = True
+                break
+            except ClientError as inner:
+                inner_code = inner.response.get("Error", {}).get("Code", "")
+                if inner_code in {"404", "NoSuchKey", "NotFound"}:
+                    continue
+                raise
+
+        if not downloaded:
             raise HTTPException(404, f"Report '{name}' not found in MinIO")
+    except ClientError as e:
         raise HTTPException(502, f"MinIO error: {e}")
 
     media = "application/json" if name.endswith(".json") else "text/html"
