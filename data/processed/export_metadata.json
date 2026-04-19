@@ -1,5 +1,5 @@
 {
-  "exported_at": "2026-04-18T00:05:36.969849",
+  "exported_at": "2026-04-19T00:17:30.725150",
   "rows": 192,
   "current_parquet": "/opt/airflow/data/processed/current.parquet",
   "predictions_csv": "/opt/airflow/data/processed/current_predictions.csv"
