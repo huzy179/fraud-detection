@@ -433,6 +433,23 @@ def _knn_predict_from_request(tx) -> tuple[float, bool, str, float]:
     return prob, is_fraud, confidence, dist_val
 
 
+def _prepare_model_features(tx) -> np.ndarray:
+    """Prepare 30-feature vector for model inference: V1..V28 + Time_scaled + Amount_scaled."""
+    d = tx.model_dump()
+    time_val = d.pop("Time")
+    amount_val = d.pop("Amount")
+
+    if time_scaler and amount_scaler:
+        time_scaled = float(time_scaler.transform([[time_val]])[0][0])
+        amount_scaled = float(amount_scaler.transform([[amount_val]])[0][0])
+    else:
+        time_scaled, amount_scaled = float(time_val), float(amount_val)
+
+    vector = [float(d.get(f"V{i}", 0.0)) for i in range(1, 29)]
+    vector.extend([time_scaled, amount_scaled])
+    return np.array([vector], dtype=np.float64)
+
+
 def predict_fraud(features: np.ndarray) -> tuple[float, bool, str]:
     """Run model inference directly (Booster for LGBM)."""
     if model_type == "lightgbm":
@@ -486,22 +503,38 @@ async def health_check():
 
 @app.post("/predict", response_model=PredictionResponse)
 async def predict(req: PredictionRequest):
-    """Predict fraud probability using nearest-neighbor lookup in preprocessed feature space."""
+    """Predict fraud probability using trained model first, KNN as fallback."""
     REQUEST_COUNT.labels(endpoint="/predict", method="POST").inc()
     start = time.time()
 
-    if _serving_knn is None:
-        _build_serving_index()
-    if _serving_knn is None:
-        raise HTTPException(status_code=503, detail="Serving index not available")
-
     try:
-        prob, is_fraud, confidence, _dist = _knn_predict_from_request(req.transaction)
+        prob = None
+        is_fraud = False
+        confidence = "low"
+        used_threshold = FRAUD_THRESHOLD
+
+        # Primary path: trained LightGBM/XGBoost model
+        if model is not None:
+            try:
+                features = _prepare_model_features(req.transaction)
+                prob, is_fraud, confidence = predict_fraud(features)
+            except Exception as e:
+                print(f"[predict] Model inference failed, fallback to KNN: {e}")
+
+        # Fallback path: nearest-neighbor lookup
+        if prob is None:
+            if _serving_knn is None:
+                _build_serving_index()
+            if _serving_knn is None:
+                raise HTTPException(status_code=503, detail="No model or serving index available")
+            prob, is_fraud, confidence, _dist = _knn_predict_from_request(req.transaction)
+            used_threshold = 0.5
+
         PREDICTION_COUNT.labels(prediction="fraud" if is_fraud else "legit").inc()
         return PredictionResponse(
             fraud_probability=round(prob, 6),
             is_fraud=is_fraud,
-            threshold=0.5,
+            threshold=round(used_threshold, 6),
             confidence=confidence,
         )
     finally:
@@ -539,19 +572,23 @@ async def create_transaction(tx: TransactionCreate, db: Session = Depends(get_db
     REQUEST_COUNT.labels(endpoint="/transactions", method="POST").inc()
     start = time.time()
 
-    # Run ML prediction via nearest-neighbor lookup (lazy init on first request)
+    # Run ML prediction: trained model first, KNN fallback
     fraud_prob = 0.0
     is_fraud = False
     confidence = "low"
 
-    if _serving_knn is None:
-        _build_serving_index()
-    if _serving_knn is not None:
-        try:
-            fraud_prob, is_fraud, confidence, dist = _knn_predict_from_request(tx)
-            PREDICTION_COUNT.labels(prediction="fraud" if is_fraud else "legit").inc()
-        except Exception as e:
-            print(f"[create_transaction] ML prediction failed: {e}")
+    try:
+        if model is not None:
+            features = _prepare_model_features(tx)
+            fraud_prob, is_fraud, confidence = predict_fraud(features)
+        else:
+            if _serving_knn is None:
+                _build_serving_index()
+            if _serving_knn is not None:
+                fraud_prob, is_fraud, confidence, _dist = _knn_predict_from_request(tx)
+        PREDICTION_COUNT.labels(prediction="fraud" if is_fraud else "legit").inc()
+    except Exception as e:
+        print(f"[create_transaction] ML prediction failed: {e}")
 
     # Save to DB — convert numpy types to native Python for psycopg2 compatibility
     db_tx = TransactionDB(
